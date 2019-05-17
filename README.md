@@ -21,23 +21,23 @@ recon.opts -- The option file, which has on each line the
     RECON_FILEPATH
     RECONSCRIPT
     RECON_DICOM_DIR
-*			      SCANNER_DICOM_DIR
-*			         LOGFILE
+    SCANNER_DICOM_DIR
+    LOGFILE
 
 
 So, as an example the options file might be
 
->   192.168.1.101
->      8000
->         kaggie
->	    mypassword
->       22
-	          /usr/g/mrraw  #path to the GE Pfile
-		     /scratch/recon
-		        recon_my_data.m  #comments are allow
-			   /scratch/recon/savedatahere
-			      /usr/g/dicomimportpath
-			         log.txt
+    192.168.1.101
+    8000
+    kaggie
+    mypassword
+    22
+    /usr/g/mrraw  #path to the GE Pfile
+    /scratch/recon
+    recon_my_data.m  #comments are allow
+    /scratch/recon/savedatahere
+    /usr/g/dicomimportpath
+    log.txt
 
 
 
