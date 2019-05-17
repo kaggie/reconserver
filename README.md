@@ -12,26 +12,26 @@ recon_signal -- The server signal that starts the recon.  This happens when a sc
 recon_listener -- This constantly runs on a server.  This can handle reconstruction from any server.
 recon.opts -- The option file, which has on each line the
 
-   HOSTNAME
-      SIGPORT
-         USERNAME
-	    PASSWORD
-	       SSHPORT
-	          MRRAW
-		     RECON_FILEPATH
-		        RECONSCRIPT
-			   RECON_DICOM_DIR
-			      SCANNER_DICOM_DIR
-			         LOGFILE
+    HOSTNAME
+    SIGPORT
+    USERNAME
+    PASSWORD
+    SSHPORT
+    MRRAW
+    RECON_FILEPATH
+    RECONSCRIPT
+    RECON_DICOM_DIR
+*			      SCANNER_DICOM_DIR
+*			         LOGFILE
 
 
 So, as an example the options file might be
 
-   192.168.1.101
-      8000
-         kaggie
-	    mypassword
-	       22
+>   192.168.1.101
+>      8000
+>         kaggie
+>	    mypassword
+>       22
 	          /usr/g/mrraw  #path to the GE Pfile
 		     /scratch/recon
 		        recon_my_data.m  #comments are allow
