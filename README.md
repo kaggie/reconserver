@@ -1,7 +1,7 @@
 # reconserver
 My server for handling reconstruction
 
-This is made for GE pfiles.  Some modifications are possible so that it could work with other scanner systems.  It's fairly general and simple.  Although Gadgetron exists, this is a bit more straightforward and has inherent encryption and simple data fidelity check against hacking. It requires an ssh connection to be available.  It's also my code, so I know how to fix the problems.
+This is made for GE pfiles.  Some modifications are possible so that it could work with other scanner systems.  It's fairly general and simple. I did not know that Gadgetron existed when I made this. Gadgetron is worth looking into, although I probably won't.  This is a very straightforward, incorporates matlab recon, has inherent encryption and simple data fidelity check against hacking (which granted is now more hackable since the code is easily visible..). It requires an ssh connection to be available.  It's also my code, so I know how to fix the problems.
 
 
 # Intro
@@ -34,7 +34,7 @@ So, as an example the options file might be
     22
     /usr/g/mrraw  #path to the GE Pfile
     /scratch/recon
-    recon_my_data.m  #comments are allow
+    recon_my_data.m  #comments are allowed; 'recon' must be in the filename or the server won't work
     /scratch/recon/savedatahere
     /usr/g/dicomimportpath
     log.txt
