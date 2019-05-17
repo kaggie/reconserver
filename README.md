@@ -44,7 +44,11 @@ So, as an example the options file might be
 It works pretty well, although there may not be python 2 and 3 differences that I haven't accounted for.  GE MRI systems do not have Python 3 as of yet, so this will work better for Python 2.  Hopefully by having it online, it will give me an easier place to update.
 
 
-I will add more later.  I'm puttin
+I will add more later.  I'm putting various of my code online.  As for the license?  I can't be bother to figure the licenses out.  Would I really know or do anything about it if you used it?  I'd probably just be pleased.
+
+
+
+I developed this while receiving some grant support from GlaxoSmithKline and the NIHR Cambridge Biomedical Research Council.  Now I receive some funding from EU Horizon 2020, and I will probably keep developing minor things to prevent too much code rot.
 
 
 
