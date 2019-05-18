@@ -48,7 +48,7 @@ I will add more later.  I'm putting various of my code online.  As for the licen
 
 
 
-I developed this while receiving some grant support from GlaxoSmithKline and the NIHR Cambridge Biomedical Research Council.  Now I receive some funding from EU Horizon 2020, and I will probably keep developing minor things to prevent too much code rot.
+I developed this while receiving some grant support from GlaxoSmithKline and the NIHR Cambridge Biomedical Research Council.  They had no input nor direct interest to this particular code, although their support allows this code to be used more broadly.  Now I receive some funding from EU Horizon 2020, and I will probably keep developing minor things to prevent too much code rot.
 
 
 
