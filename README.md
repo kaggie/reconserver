@@ -1,57 +1,173 @@
-# reconserver
-My server for handling reconstruction
+# Secure Reconstruction Server & Client
 
-This is made for GE pfiles.  Some modifications are possible so that it could work with other scanner systems.  It's fairly general and simple. I did not know that Gadgetron existed when I made this. Gadgetron is worth looking into, although I probably won't.  This is a very straightforward, incorporates matlab recon, has inherent encryption and simple data fidelity check against hacking (which granted is now more hackable since the code is easily visible..). It requires an ssh connection to be available.  It's also my code, so I know how to fix the problems.
+## Overview
 
+This project provides a secure system for a client application to request data processing (e.g., medical image reconstruction) from a server. The core functionality involves a server-driven workflow where:
 
-# Intro
-There are four files required for this:
+*   A server application listens for client connections.
+*   A client application initiates contact and specifies the data to be processed.
+*   The server requests the necessary input file (e.g., PFILE) from the client.
+*   All communication, including file transfers and command messages, is secured using AES encryption (via Fernet library) over Python sockets.
+*   The server executes external reconstruction scripts.
+*   Processed results (e.g., DICOM files) are securely transferred back to the client.
 
-reconlibs -- the standard library for my internet protocol
-recon_signal -- The server signal that starts the recon.  This happens when a scanning sequence is done.
-recon_listener -- This constantly runs on a server.  This can handle reconstruction from any server.
-recon.opts -- The option file, which has on each line the
+The system is built with Python, emphasizing modularity by separating network communication, cryptographic operations, and application logic.
 
-    HOSTNAME
-    SIGPORT
-    USERNAME
-    PASSWORD
-    SSHPORT
-    MRRAW
-    RECON_FILEPATH
-    RECONSCRIPT
-    RECON_DICOM_DIR
-    SCANNER_DICOM_DIR
-    LOGFILE
+## Core Components
 
+The project is comprised of the following key Python modules:
 
-So, as an example the options file might be
+*   **`server_app.py`**: The main server application. It initializes `SecureFileTransferServer` and manages the overall workflow:
+    *   Listens for and accepts client connections.
+    *   Validates client IPs against a trusted list (if configured).
+    *   Communicates with the client to get details of the data (PFILE) to be processed.
+    *   Requests the PFILE from the client.
+    *   Triggers an external reconstruction script using the received PFILE.
+    *   Sends the reconstructed output files (e.g., DICOMs) back to the client.
+    *   Logs its operations to the file specified in `recon.opts`.
 
-    192.168.1.101
-    8000
-    kaggie
-    mypassword
-    22
-    /usr/g/mrraw  #path to the GE Pfile
-    /scratch/recon
-    recon_my_data.m  #comments are allowed; 'recon' must be in the filename or the server won't work
-    /scratch/recon/savedatahere
-    /usr/g/dicomimportpath
-    log.txt
+*   **`client_app.py`**: The main client application. It initializes `SecureFileTransferClient` to interact with the server:
+    *   Connects to the server.
+    *   Responds to server commands, such as providing details about the PFILE to be processed.
+    *   Sends the requested PFILE securely to the server when prompted.
+    *   Receives processed files (e.g., DICOMs) from the server and saves them to a local `client_downloads/` directory.
+    *   Logs its operations to the file specified in `recon.opts`.
 
+*   **`secure_transfer.py`**: This module provides the foundation for secure communication:
+    *   `SecureFileTransferServer`: Handles incoming connections, message decryption, and manages the server-side aspects of file transfers (receiving from client, sending to client). Includes the `receive_file_securely` method for dedicated file reception.
+    *   `SecureFileTransferClient`: Manages connection to the server, message encryption, and client-side aspects of file transfers (sending to server, receiving from server).
+    *   Both classes implement a protocol for message framing (fixed-size length headers using `struct`), JSON-based message structure (`{"type": ..., "payload": ...}`), AES encryption/decryption of messages, and chunked file transfers with acknowledgments.
 
+*   **`reconlibs.py`**: A utility library containing shared functions:
+    *   `readoptions(optionfile)`: Reads and parses the `recon.opts` configuration file. It also generates a default `recon.opts` if one doesn't exist, pre-filled with standard options and comments.
+    *   `generate_key()`: Generates a new Fernet (AES) encryption key. This is a crucial utility for setting up the secure channel.
+    *   `encrypt_data(data, key_string)`: Encrypts byte data using the shared Fernet key string.
+    *   `decrypt_data(encrypted_data, key_string)`: Decrypts data using the shared Fernet key string.
 
-It works pretty well, although there may not be python 2 and 3 differences that I haven't accounted for.  GE MRI systems do not have Python 3 as of yet, so this will work better for Python 2.  Hopefully by having it online, it will give me an easier place to update.
+## Setup and Configuration (`recon.opts`)
 
+Configuration for both server and client applications is managed through a `recon.opts` file. This file must be present and correctly configured for the system to operate. If `recon.opts` is not found when `reconlibs.readoptions()` is first called (typically on app startup), a default version with comments will be created. **Users MUST edit this default file, especially to set a unique `SHARED_KEY`.**
 
-I will add more later.  I'm putting various of my code online.  As for the license?  I can't be bother to figure the licenses out.  Would I really know or do anything about it if you used it?  I'd probably just be pleased.
+**Example `recon.opts` (as generated by `reconlibs.readoptions`):**
 
+```
+# Recon server IP address or hostname (e.g., localhost, 192.168.1.100)
+localhost
+# Port for recon server communication (e.g., 60000)
+60000
+# Username for scanner authentication (legacy, may not be used by current server)
+sdc
+# Password for scanner authentication (legacy, may not be used by current server)
+adw2.0
+# SSH port for secure shell access (legacy, currently unused by server_app)
+22
+# Path to source data (legacy, MRRAW directory, less relevant if PFILE sent by client)
+/usr/g/mrraw/
+# Server's directory for downloaded PFILEs and temporary recon files
+/tmp/recon_server_pfiles
+# Full path or name of the reconstruction script on the server (e.g., /opt/scripts/matlab_recon.sh or python_recon.py)
+default_recon_script.sh
+# Server's directory where reconstructed DICOMs are stored (and from where they are sent to client)
+/tmp/recon_server_dicoms
+# Scanner's DICOM directory (legacy, less relevant if DICOMs are sent back to client)
+/tmp/scanner_dicoms/
+# Path to the log file for server and client applications
+/tmp/recon_project.log
+# --- Secure Transfer Options ---
+# SHARED_KEY: A securely generated Fernet key for encrypting transfers.
+# IMPORTANT: Generate using: python -c "from reconlibs import generate_key; print(generate_key())"
+# Copy the output key and paste it here, replacing the placeholder.
+# This key MUST be identical on both the client and server.
+SHARED_KEY = SET_YOUR_SHARED_KEY_HERE
+# --- Server Options ---
+# TRUSTEDIPS: Comma-separated list of client IP addresses allowed to connect to the server.
+# Example: #TRUSTEDIPS: 192.168.1.101,192.168.1.102
+# If commented out or empty, the server may allow all IPs (check server_app logic).
+#TRUSTEDIPS: 127.0.0.1,::1
+# --- Client Options ---
+# CLIENT_DEFAULT_PFILE_NAME: Default PFILE name for the client application if not specified on command line.
+CLIENT_DEFAULT_PFILE_NAME = P00000.7
+# CLIENT_DEFAULT_PFILE_PATH: Default full path to the PFILE on the client machine if not specified on command line.
+CLIENT_DEFAULT_PFILE_PATH = /tmp/default_pfile_on_client/P00000.7
+# --- Other Misc Options (add as KEY = VALUE or #COMMENT) ---
+```
 
+**Key Explanations:**
 
-I developed this while receiving some grant support from GlaxoSmithKline and the NIHR Cambridge Biomedical Research Council.  They had no input nor direct interest to this particular code, although their support allows this code to be used more broadly.  Now I receive some funding from EU Horizon 2020, and I will probably keep developing minor things to prevent too much code rot.
+*   `SERVER_HOSTNAME`, `SERVER_PORT`: Network details for the server.
+*   `SHARED_KEY`: **Crucial for security.** This is a Fernet (AES in CBC mode with 128-bit key) used to encrypt all communication.
+    *   It **must be identical** in `recon.opts` for both server and client.
+    *   Generate a new key using the command below and paste the output into `recon.opts`.
+*   `RECON_FILEPATH`: Directory on the **server** where PFILEs received from clients are stored. This is the `download_dir` for `SecureFileTransferServer`.
+*   `RECON_SCRIPT`: Full path to the main reconstruction script (e.g., `.sh`, `.m`, `.py`) on the **server**.
+*   `RECON_DICOM_DIR`: Directory on the **server** where the `RECON_SCRIPT` should place output DICOM files. The server sends files from this directory to the client.
+*   `LOGFILE`: Path for logging. Both server and client apps will use this.
+*   `TRUSTEDIPS`: (Server-side) Comma-separated list of client IP addresses allowed to connect. If empty or commented out, the server might allow all IPs (current behavior).
+*   `CLIENT_DEFAULT_PFILE_NAME`: (Client-side) Default PFILE name if not specified via client's command line.
+*   `CLIENT_DEFAULT_PFILE_PATH`: (Client-side) Default full path to the PFILE on the client's machine if not specified via command line. `client_app.py` may create a dummy file here for testing if it doesn't exist.
+*   **Obsolete Options:** `USERNAME`, `PASSWORD`, `SSHPORT` (related to older `scp` methods), `MRRAW` (conceptually replaced by client sending its PFILE path), and `SCANNER_DICOM_DIR` (client now downloads to its local `client_downloads/` directory) are legacy and not used by the current secure transfer mechanism.
 
+**Key Generation Command:**
+To generate a new `SHARED_KEY`:
+1.  Ensure the `cryptography` library is installed (`pip install cryptography`).
+2.  Navigate to the project directory in your terminal.
+3.  Run the following command:
+    ```bash
+    python -c "from reconlibs import generate_key; print(generate_key())"
+    ```
+4.  Copy the entire output string and paste it as the value for `SHARED_KEY` in your `recon.opts` file, replacing `SET_YOUR_SHARED_KEY_HERE`.
 
+## Workflow
 
+1.  The **Server** (`server_app.py`) is started. It loads `recon.opts` and listens for connections.
+2.  The **Client** (`client_app.py`) is started, optionally with a path to a PFILE. It loads `recon.opts` and connects to the Server.
+3.  The Server (after validating the client's IP if `TRUSTEDIPS` is set) sends a `get_recon_details` command.
+4.  The Client responds with `recon_details_response`, providing the PFILE name, its full path on the client's system, and any client-side reconstruction options.
+5.  The Server sends a `request_file` command, specifying the PFILE path it expects (the one provided by the client).
+6.  The Client, upon receiving this, uses `sf_client.send_file()` to securely transfer the PFILE. The Server uses `sf_server.receive_file_securely()` to save it into its `RECON_FILEPATH`.
+7.  The Server triggers the `RECON_SCRIPT` (from `recon.opts`), passing necessary PFILE information.
+8.  The reconstruction script runs and places output (e.g., DICOM files) into the Server's `RECON_DICOM_DIR`.
+9.  The Server sends a `dicom_transfer_start` command, then iterates through files in `RECON_DICOM_DIR`, sending each securely to the Client using `sf_server.send_file_to_client()`.
+10. The Client receives these files and saves them into its local `client_downloads/` directory.
+11. After all files are sent (or if no files were produced), the Server sends a `recon_complete` command.
+12. The Client acknowledges, terminates its listening loop, and disconnects. The Server closes the connection and awaits new clients.
 
+## Running the Applications
 
+### Server:
+```bash
+python server_app.py
+```
+The server loads configuration from `recon.opts` (expected in the same directory) and starts listening.
 
+### Client:
+```bash
+python client_app.py [path_to_your_pfile]
+```
+*   `[path_to_your_pfile]` (Optional): The full path to the PFILE for reconstruction. If provided, this overrides `CLIENT_DEFAULT_PFILE_PATH` and `CLIENT_DEFAULT_PFILE_NAME` from `recon.opts`.
+*   If no path is provided, the client uses defaults from `recon.opts`. If `CLIENT_DEFAULT_PFILE_PATH` doesn't exist, a dummy PFILE may be created for testing.
+
+Ensure `recon.opts` is correctly configured (especially `SHARED_KEY`) and accessible.
+
+## Triggering External Code
+
+*   **Server-Side (Reconstruction):** The primary external code is the `RECON_SCRIPT` defined in `recon.opts`. `server_app.py`'s `_trigger_external_script` method executes this.
+    *   It supports Python (`.py`), Matlab (`.m`), or general shell scripts (`.sh`).
+    *   Arguments like the PFILE name/path and client options are passed to the script.
+*   **Client-Side (Placeholder):** `client_app.py` includes a placeholder `_execute_local_script`. This is not actively used in the current workflow but can be expanded if server-to-client script execution is needed.
+
+## Security
+
+*   **Encryption:** All commands, responses, and file data are encrypted using AES (via Fernet library) with the `SHARED_KEY`.
+*   **`SHARED_KEY`:** The confidentiality of this key is paramount. It must be strong, unique, and identically configured on the server and all authorized clients. Access to `recon.opts` should be restricted.
+*   **`TRUSTEDIPS`:** Provides an optional server-side IP whitelist for an additional layer of access control.
+
+## Future Developments
+
+*   **Client-Side Daemon:** A service to monitor a directory for new PFILEs and auto-initiate processing.
+*   **Enhanced Commands:** More sophisticated command and control (e.g., server status, queue management).
+*   **Job Queuing:** Server-side queuing if multiple clients or concurrent processing is desired.
+*   **GUI Interfaces:** User interfaces for easier operation.
+*   **Configurable Client Download Directory:** Allow `client_downloads/` path to be set in `recon.opts`.
+*   **Robust Script Argument Passing:** Standardize how `client_recon_options` are passed to and utilized by various `RECON_SCRIPT` types.
+```
