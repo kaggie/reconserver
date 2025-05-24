@@ -1,54 +1,33 @@
-# Secure Reconstruction Server & Client
+# Secure Reconnaissance Server System
 
 ## Overview
 
-This project provides a secure system for a client application to request data processing (e.g., medical image reconstruction) from a server. The core functionality involves a server-driven workflow where:
+This system provides a secure client-server architecture for requesting remote data processing, specifically tailored for medical image reconstruction tasks. It features encrypted file transfer for all data and commands, and robust job management capabilities including queuing and status reporting.
 
-*   A server application listens for client connections.
-*   A client application initiates contact and specifies the data to be processed.
-*   The server requests the necessary input file (e.g., PFILE) from the client.
-*   All communication, including file transfers and command messages, is secured using AES encryption (via Fernet library) over Python sockets.
-*   The server executes external reconstruction scripts.
-*   Processed results (e.g., DICOM files) are securely transferred back to the client.
-
-The system is built with Python, emphasizing modularity by separating network communication, cryptographic operations, and application logic.
+**Core Technologies:**
+*   Python
+*   Shared Key Encryption (AES via Fernet library)
+*   Socket Communication (TCP/IP)
 
 ## Core Components
 
-The project is comprised of the following key Python modules:
-
-*   **`server_app.py`**: The main server application. It initializes `SecureFileTransferServer` and manages the overall workflow:
-    *   Listens for and accepts client connections.
-    *   Validates client IPs against a trusted list (if configured).
-    *   Communicates with the client to get details of the data (PFILE) to be processed.
-    *   Requests the PFILE from the client.
-    *   Triggers an external reconstruction script using the received PFILE.
-    *   Sends the reconstructed output files (e.g., DICOMs) back to the client.
-    *   Logs its operations to the file specified in `recon.opts`.
-
-*   **`client_app.py`**: The main client application. It initializes `SecureFileTransferClient` to interact with the server:
-    *   Connects to the server.
-    *   Responds to server commands, such as providing details about the PFILE to be processed.
-    *   Sends the requested PFILE securely to the server when prompted.
-    *   Receives processed files (e.g., DICOMs) from the server and saves them to a local `client_downloads/` directory.
-    *   Logs its operations to the file specified in `recon.opts`.
-
-*   **`secure_transfer.py`**: This module provides the foundation for secure communication:
-    *   `SecureFileTransferServer`: Handles incoming connections, message decryption, and manages the server-side aspects of file transfers (receiving from client, sending to client). Includes the `receive_file_securely` method for dedicated file reception.
-    *   `SecureFileTransferClient`: Manages connection to the server, message encryption, and client-side aspects of file transfers (sending to server, receiving from server).
-    *   Both classes implement a protocol for message framing (fixed-size length headers using `struct`), JSON-based message structure (`{"type": ..., "payload": ...}`), AES encryption/decryption of messages, and chunked file transfers with acknowledgments.
-
-*   **`reconlibs.py`**: A utility library containing shared functions:
-    *   `readoptions(optionfile)`: Reads and parses the `recon.opts` configuration file. It also generates a default `recon.opts` if one doesn't exist, pre-filled with standard options and comments.
-    *   `generate_key()`: Generates a new Fernet (AES) encryption key. This is a crucial utility for setting up the secure channel.
-    *   `encrypt_data(data, key_string)`: Encrypts byte data using the shared Fernet key string.
-    *   `decrypt_data(encrypted_data, key_string)`: Decrypts data using the shared Fernet key string.
+*   **`server_app.py`**: The main server application. It listens for client connections, handles incoming commands (job submission, status requests), manages a job queue, and dispatches processing tasks to worker threads. It's responsible for receiving input files, triggering external reconstruction scripts, and sending back results.
+*   **`client_app.py`**: The main client application. It can be used to submit reconstruction jobs (including multiple input files and processing options), query the server's status, and view the current job queue. It handles the secure transfer of files to the server and receives processed results.
+*   **`secure_transfer.py`**: This module contains the `SecureFileTransferServer` and `SecureFileTransferClient` classes, which implement the encrypted communication protocol using a shared Fernet key. All data and control messages are encrypted.
+*   **`reconlibs.py`**: A library of shared utility functions, primarily for reading and writing the `recon.opts` configuration file and cryptographic helper functions.
 
 ## Setup and Configuration (`recon.opts`)
 
-Configuration for both server and client applications is managed through a `recon.opts` file. This file must be present and correctly configured for the system to operate. If `recon.opts` is not found when `reconlibs.readoptions()` is first called (typically on app startup), a default version with comments will be created. **Users MUST edit this default file, especially to set a unique `SHARED_KEY`.**
+The behavior of both the server and client applications is configured through a shared `recon.opts` file. This file must be present in the same directory as the script being run (or its path specified via CLI if that option is added). If not found, a default `recon.opts` will be created.
 
-**Example `recon.opts` (as generated by `reconlibs.readoptions`):**
+**It is CRITICAL to generate a secure `SHARED_KEY` and configure it in `recon.opts` on both the server and any client machines.**
+
+To generate a new shared key, run:
+`python -c "from reconlibs import generate_key; print(generate_key())"`
+
+Copy the output string and paste it as the value for `SHARED_KEY`.
+
+**Example `recon.opts` Structure:**
 
 ```
 # Recon server IP address or hostname (e.g., localhost, 192.168.1.100)
@@ -63,7 +42,7 @@ adw2.0
 22
 # Path to source data (legacy, MRRAW directory, less relevant if PFILE sent by client)
 /usr/g/mrraw/
-# Server's directory for downloaded PFILEs and temporary recon files
+# Server's base directory for downloaded PFILEs and job-specific input subdirectories
 /tmp/recon_server_pfiles
 # Full path or name of the reconstruction script on the server (e.g., /opt/scripts/matlab_recon.sh or python_recon.py)
 default_recon_script.sh
@@ -71,7 +50,7 @@ default_recon_script.sh
 /tmp/recon_server_dicoms
 # Scanner's DICOM directory (legacy, less relevant if DICOMs are sent back to client)
 /tmp/scanner_dicoms/
-# Path to the log file for server and client applications
+# Path to the log file for server and client applications (can be overridden by client/daemon specific opts)
 /tmp/recon_project.log
 # --- Secure Transfer Options ---
 # SHARED_KEY: A securely generated Fernet key for encrypting transfers.
@@ -79,95 +58,136 @@ default_recon_script.sh
 # Copy the output key and paste it here, replacing the placeholder.
 # This key MUST be identical on both the client and server.
 SHARED_KEY = SET_YOUR_SHARED_KEY_HERE
-# --- Server Options ---
+# --- Server Specific Options ---
+# MAX_CONCURRENT_JOBS: Max number of recon jobs server processes simultaneously (e.g., 1 for sequential).
+MAX_CONCURRENT_JOBS = 1
 # TRUSTEDIPS: Comma-separated list of client IP addresses allowed to connect to the server.
 # Example: #TRUSTEDIPS: 192.168.1.101,192.168.1.102
 # If commented out or empty, the server may allow all IPs (check server_app logic).
 #TRUSTEDIPS: 127.0.0.1,::1
-# --- Client Options ---
-# CLIENT_DEFAULT_PFILE_NAME: Default PFILE name for the client application if not specified on command line.
+# --- Client Daemon Options (for client_daemon.py) ---
+# CLIENT_WATCH_DIRECTORY = 
+# CLIENT_WATCH_PATTERN = *.7
+# CLIENT_DAEMON_POLL_INTERVAL = 10 # (Used by daemon if watchdog is not active/available)
+# CLIENT_DAEMON_STABILITY_DELAY = 5
+# CLIENT_DAEMON_GROUPING_TIMEOUT = 5
+# CLIENT_DAEMON_RECON_OPTIONS_JSON = {}
+# --- Standard Client Application Options (for client_app.py) ---\
 CLIENT_DEFAULT_PFILE_NAME = P00000.7
-# CLIENT_DEFAULT_PFILE_PATH: Default full path to the PFILE on the client machine if not specified on command line.
 CLIENT_DEFAULT_PFILE_PATH = /tmp/default_pfile_on_client/P00000.7
-# --- Other Misc Options (add as KEY = VALUE or #COMMENT) ---
+CLIENT_DOWNLOAD_DIR = client_downloads
 ```
 
-**Key Explanations:**
+**Note on Legacy Options:**
+The `USERNAME`, `PASSWORD`, `SSHPORT` (for scanner authentication), `MRRAW_PATH` (source data path on scanner), and `SCANNER_DICOM_DIR` options are largely legacy from an older version of the system. The current client-server model primarily relies on the client sending the necessary input files directly. These options are retained for potential backward compatibility or specific site setups but are not actively used by the core `server_app.py` logic for file acquisition in the primary workflow.
 
-*   `SERVER_HOSTNAME`, `SERVER_PORT`: Network details for the server.
-*   `SHARED_KEY`: **Crucial for security.** This is a Fernet (AES in CBC mode with 128-bit key) used to encrypt all communication.
-    *   It **must be identical** in `recon.opts` for both server and client.
-    *   Generate a new key using the command below and paste the output into `recon.opts`.
-*   `RECON_FILEPATH`: Directory on the **server** where PFILEs received from clients are stored. This is the `download_dir` for `SecureFileTransferServer`.
-*   `RECON_SCRIPT`: Full path to the main reconstruction script (e.g., `.sh`, `.m`, `.py`) on the **server**.
-*   `RECON_DICOM_DIR`: Directory on the **server** where the `RECON_SCRIPT` should place output DICOM files. The server sends files from this directory to the client.
-*   `LOGFILE`: Path for logging. Both server and client apps will use this.
-*   `TRUSTEDIPS`: (Server-side) Comma-separated list of client IP addresses allowed to connect. If empty or commented out, the server might allow all IPs (current behavior).
-*   `CLIENT_DEFAULT_PFILE_NAME`: (Client-side) Default PFILE name if not specified via client's command line.
-*   `CLIENT_DEFAULT_PFILE_PATH`: (Client-side) Default full path to the PFILE on the client's machine if not specified via command line. `client_app.py` may create a dummy file here for testing if it doesn't exist.
-*   **Obsolete Options:** `USERNAME`, `PASSWORD`, `SSHPORT` (related to older `scp` methods), `MRRAW` (conceptually replaced by client sending its PFILE path), and `SCANNER_DICOM_DIR` (client now downloads to its local `client_downloads/` directory) are legacy and not used by the current secure transfer mechanism.
+## Workflow & Features
 
-**Key Generation Command:**
-To generate a new `SHARED_KEY`:
-1.  Ensure the `cryptography` library is installed (`pip install cryptography`).
-2.  Navigate to the project directory in your terminal.
-3.  Run the following command:
-    ```bash
-    python -c "from reconlibs import generate_key; print(generate_key())"
-    ```
-4.  Copy the entire output string and paste it as the value for `SHARED_KEY` in your `recon.opts` file, replacing `SET_YOUR_SHARED_KEY_HERE`.
+The system operates on a client-initiated command model.
 
-## Workflow
+### Job Submission (Client-Initiated)
 
-1.  The **Server** (`server_app.py`) is started. It loads `recon.opts` and listens for connections.
-2.  The **Client** (`client_app.py`) is started, optionally with a path to a PFILE. It loads `recon.opts` and connects to the Server.
-3.  The Server (after validating the client's IP if `TRUSTEDIPS` is set) sends a `get_recon_details` command.
-4.  The Client responds with `recon_details_response`, providing the PFILE name, its full path on the client's system, and any client-side reconstruction options.
-5.  The Server sends a `request_file` command, specifying the PFILE path it expects (the one provided by the client).
-6.  The Client, upon receiving this, uses `sf_client.send_file()` to securely transfer the PFILE. The Server uses `sf_server.receive_file_securely()` to save it into its `RECON_FILEPATH`.
-7.  The Server triggers the `RECON_SCRIPT` (from `recon.opts`), passing necessary PFILE information.
-8.  The reconstruction script runs and places output (e.g., DICOM files) into the Server's `RECON_DICOM_DIR`.
-9.  The Server sends a `dicom_transfer_start` command, then iterates through files in `RECON_DICOM_DIR`, sending each securely to the Client using `sf_server.send_file_to_client()`.
-10. The Client receives these files and saves them into its local `client_downloads/` directory.
-11. After all files are sent (or if no files were produced), the Server sends a `recon_complete` command.
-12. The Client acknowledges, terminates its listening loop, and disconnects. The Server closes the connection and awaits new clients.
+1.  The client (`client_app.py`) initiates a connection to the server.
+2.  The client sends a `submit_recon_job` command. This command's payload includes:
+    *   `files`: A list of dictionaries, where each dictionary describes an input file. Each file dictionary contains:
+        *   `name`: The basename of the file.
+        *   `original_path_on_client`: The full path to the file on the client's machine.
+    *   `client_recon_options_json`: A JSON string representing a dictionary of reconstruction parameters (e.g., `{"slice_thickness": "2mm", "algorithm": "filtered_backprojection"}`).
+    *   The client CLI supports specifying multiple files directly (`--files /path/to/P00000.7 /path/to/calibration.dat`) or a directory with a pattern (`--directory /scans/today --pattern "*.dat"`).
+
+### Server Processing
+
+1.  The server receives the `submit_recon_job` command.
+2.  A unique `job_id` (UUID) is generated for the job.
+3.  A job-specific input directory is created on the server under the path specified by `RECON_FILEPATH` in `recon.opts` (e.g., `/tmp/recon_server_pfiles/job_<uuid>_input/`).
+4.  The server iterates through the `files` list received from the client:
+    *   For each file, it sends a `request_file` command to the client, specifying the `original_path_on_client`.
+    *   The client responds by sending the requested file.
+    *   The server receives the file and saves it into the job-specific input directory.
+5.  Once all files are received, the job (containing the `job_id`, path to the `job_input_dir_on_server`, number of input files, primary input file name, submission timestamp, initial status "queued", and `client_recon_options`) is added to an internal queue.
+6.  The server sends a `job_queued` message back to the client, including the `job_id` and the number of files received.
+7.  A worker thread on the server picks up the job from the queue (status then changes to "processing" conceptually).
+8.  The worker thread executes the `RECON_SCRIPT` (defined in `recon.opts`).
+    *   The primary argument passed to this script is the path to the `job_input_dir_on_server`.
+    *   Reconstruction options from `client_recon_options` are passed as additional command-line arguments. For Python/shell scripts, these are typically passed as `--key value`. For Matlab scripts, they are passed as sequential string arguments `'key', 'value', 'key2', 'value2...'`. The external script must be designed to parse these arguments.
+9.  The reconstruction script is expected to write its output (e.g., DICOM files) to a directory. The server currently looks for these outputs in the general `RECON_DICOM_DIR`. (Future enhancements may involve job-specific output directories managed by the server or script).
+10. If DICOM files (or other results) are found, the server sends a `dicom_transfer_start` command to the client (including the number of files). The client must acknowledge with a status of "ready".
+11. The server then sends each result file to the client. These are saved in the client's `CLIENT_DOWNLOAD_DIR`.
+12. Upon successful completion (including file transfer), the server sends a `recon_complete` message. If any part of the processing or script execution fails, a `job_failed` message is sent.
+13. The job-specific input directory on the server is automatically cleaned up (deleted) after the job is processed (whether success or failure).
+
+### Server Status & Queue Viewing (Client CLI)
+
+Clients can query the server without submitting a job:
+
+*   **`python client_app.py --server-status`**:
+    *   The client connects and sends a `get_server_status` command.
+    *   The server responds with `server_status_response` containing:
+        *   Server uptime.
+        *   Configured maximum number of worker threads (`MAX_CONCURRENT_JOBS`).
+        *   Current number of active worker threads.
+        *   Number of jobs currently in the queue.
+    *   The client displays this information.
+
+*   **`python client_app.py --view-queue`**:
+    *   The client connects and sends a `get_queue_details` command.
+    *   The server responds with `queue_details_response` containing a list of jobs currently in its queue. For each job, details include:
+        *   Job ID.
+        *   Status (e.g., "queued").
+        *   Primary input file name.
+        *   Number of input files.
+        *   Submission time (UTC).
+        *   Basename of the job's input directory on the server.
+    *   The client displays this list.
 
 ## Running the Applications
 
-### Server:
+### Server
 ```bash
 python server_app.py
 ```
-The server loads configuration from `recon.opts` (expected in the same directory) and starts listening.
+The server will use `recon.opts` found in its current working directory. Ensure `recon.opts` is configured correctly, especially `SHARED_KEY`, paths, and `MAX_CONCURRENT_JOBS`.
 
-### Client:
+### Client (Submitting Reconstruction Jobs)
+To submit one or more specific files:
 ```bash
-python client_app.py [path_to_your_pfile]
+python client_app.py --files /path/to/PFILE.7 /path/to/another_input.dat --recon-options '{"option1": "value1", "num_slices": 128}'
 ```
-*   `[path_to_your_pfile]` (Optional): The full path to the PFILE for reconstruction. If provided, this overrides `CLIENT_DEFAULT_PFILE_PATH` and `CLIENT_DEFAULT_PFILE_NAME` from `recon.opts`.
-*   If no path is provided, the client uses defaults from `recon.opts`. If `CLIENT_DEFAULT_PFILE_PATH` doesn't exist, a dummy PFILE may be created for testing.
 
-Ensure `recon.opts` is correctly configured (especially `SHARED_KEY`) and accessible.
+To submit all files matching a pattern in a directory:
+```bash
+python client_app.py --directory /path/to/scan_data/ --pattern "*.dcm" --recon-options '{"custom_script_param": true}'
+```
+
+If no files or directory are specified, the client will attempt to use `CLIENT_DEFAULT_PFILE_PATH` from `recon.opts`.
+
+### Client (Querying Server)
+To check server status:
+```bash
+python client_app.py --server-status
+```
+
+To view the job queue:
+```bash
+python client_app.py --view-queue
+```
 
 ## Triggering External Code
 
-*   **Server-Side (Reconstruction):** The primary external code is the `RECON_SCRIPT` defined in `recon.opts`. `server_app.py`'s `_trigger_external_script` method executes this.
-    *   It supports Python (`.py`), Matlab (`.m`), or general shell scripts (`.sh`).
-    *   Arguments like the PFILE name/path and client options are passed to the script.
-*   **Client-Side (Placeholder):** `client_app.py` includes a placeholder `_execute_local_script`. This is not actively used in the current workflow but can be expanded if server-to-client script execution is needed.
+The primary mechanism for external code execution is the `RECON_SCRIPT` defined in `recon.opts`.
+*   This script is executed by the server's worker threads.
+*   The main argument passed to this script is now the **path to the job-specific input directory** which contains all files submitted by the client for that job.
+*   Additional parameters from the client's `--recon-options` are passed as command-line arguments to the script.
+    *   For Python/shell scripts: `--key value`
+    *   For Matlab scripts: `'key', 'value'` (passed as sequential string arguments to the Matlab function).
+*   The script is responsible for performing the reconstruction and placing output files (e.g., DICOMs) in a location accessible by the server (currently the general `RECON_DICOM_DIR`, though future improvements might make this job-specific).
 
 ## Security
 
-*   **Encryption:** All commands, responses, and file data are encrypted using AES (via Fernet library) with the `SHARED_KEY`.
-*   **`SHARED_KEY`:** The confidentiality of this key is paramount. It must be strong, unique, and identically configured on the server and all authorized clients. Access to `recon.opts` should be restricted.
-*   **`TRUSTEDIPS`:** Provides an optional server-side IP whitelist for an additional layer of access control.
+*   **Encryption:** All communication between the client and server, including file data and control messages, is encrypted using AES via the Fernet library. This relies on a pre-shared `SHARED_KEY`.
+*   **Shared Key:** The `SHARED_KEY` in `recon.opts` is critical. It must be kept secret and be identical on the server and all authorized clients.
+*   **Trusted IPs:** The server can be configured with a list of `TRUSTEDIPS` in `recon.opts`. If this list is populated, the server will only accept connections from these IP addresses, providing an additional layer of access control. If empty or commented out, the server may accept connections from any IP (depending on firewall configurations).
 
-## Future Developments
-
-*   **Client-Side Daemon:** A service to monitor a directory for new PFILEs and auto-initiate processing.
-*   **Enhanced Commands:** More sophisticated command and control (e.g., server status, queue management).
-*   **Job Queuing:** Server-side queuing if multiple clients or concurrent processing is desired.
-*   **GUI Interfaces:** User interfaces for easier operation.
-*   **Configurable Client Download Directory:** Allow `client_downloads/` path to be set in `recon.opts`.
-*   **Robust Script Argument Passing:** Standardize how `client_recon_options` are passed to and utilized by various `RECON_SCRIPT` types.
+---
+This README reflects the system's state after Phase 2 development.
 ```
