@@ -19,7 +19,9 @@ This system provides a secure client-server architecture for requesting remote d
 *   **`relay_server.py`** (Experimental): A basic relay server component, intended to route client requests to backend reconstruction servers. It uses a `relay.opts` configuration file with a similar `ITEM = VALUE` format and also features an admin interface.
 *   **`server_admin_cli.py`**: A command-line tool for administering and monitoring `server_app.py`.
 *   **`relay_server_cli.py`**: A command-line tool for administering and monitoring `relay_server.py`.
-*   **`example_usage.ipynb`**: A Jupyter Notebook demonstrating programmatic interaction with `server_app.py`.
+*   **Jupyter Notebook Examples**:
+    *   **`example_usage.ipynb`**: Demonstrates programmatic interaction directly with `server_app.py`.
+    *   **`example_relay_usage.ipynb`**: Demonstrates end-to-end job submission through `relay_server.py` to a backend `server_app.py`.
 
 ## Dependencies
 
@@ -27,10 +29,11 @@ The system requires the following Python libraries:
 *   `cryptography`: For Fernet encryption.
 *   `psutil`: For server resource monitoring (CPU/memory).
 *   `python-json-logger`: For structured JSON logging.
+*   `jupyter` (optional, for running notebooks): `notebook` or `jupyterlab`.
 
 Install them using pip:
 ```bash
-pip install cryptography psutil python-json-logger
+pip install cryptography psutil python-json-logger notebook jupyterlab
 ```
 
 ## Setup and Configuration
@@ -52,6 +55,7 @@ python -c "from reconlibs import generate_key; print(generate_key())"
 2.  Server Admin interface (`SERVER_ADMIN_SHARED_KEY` in `recon.opts`).
 3.  Relay Client-Facing interface (`SHARED_KEY_RELAY_TO_CLIENTS` in `relay.opts`).
 4.  Relay Admin interface (`RELAY_ADMIN_SHARED_KEY` in `relay.opts`).
+5.  Relay to Backend communication (`SHARED_KEY_FOR_BACKENDS` in `relay.opts`).
 
 ### Main Server Configuration (`recon.opts`)
 
@@ -130,6 +134,11 @@ SHARED_KEY_RELAY_TO_CLIENTS = SET_YOUR_RELAY_TO_CLIENTS_KEY_HERE
 # --- Backend Reconstruction Servers ---
 # Comma-separated list of host:port pairs
 BACKEND_SERVERS = localhost:60000 
+# Shared key for the relay to communicate with backend servers (must match backend's main SHARED_KEY)
+SHARED_KEY_FOR_BACKENDS = SET_YOUR_BACKEND_SERVERS_SHARED_KEY_HERE
+
+# --- Relay Temporary Storage ---
+RELAY_JOB_TEMP_DIR = /tmp/relay_job_files # For temporarily storing files during relay
 
 # --- Relay Admin Interface (for relay_server_cli.py) ---
 RELAY_ADMIN_PORT = 60002
@@ -154,6 +163,17 @@ The server (`server_app.py`) processes reconstruction jobs as follows:
 *   If average CPU load (via `MAX_CPU_LOAD_PERCENT`) or available memory (via `MIN_AVAILABLE_MEMORY_MB`) thresholds are breached, the server's worker threads will pause fetching new jobs from the queue.
 *   They will wait for `RESOURCE_CHECK_INTERVAL_SECONDS` before re-checking resources. This prevents the server from being overwhelmed.
 
+### Relay Server Job Forwarding
+The `relay_server.py` (experimental) can forward jobs to backend reconstruction servers:
+1.  Client connects to the Relay Server and submits a job.
+2.  Relay Server receives the job and files, storing files temporarily in `RELAY_JOB_TEMP_DIR`.
+3.  Relay selects a healthy backend server from `BACKEND_SERVERS`.
+4.  Relay connects to the chosen backend server using `SHARED_KEY_FOR_BACKENDS`.
+5.  Relay forwards the job (rewriting file paths to its temporary storage) and then streams the files to the backend.
+6.  Backend server processes the job as usual.
+7.  Relay confirms to the client that the job has been relayed and queued on the backend (includes `relay_job_id` and `backend_job_id`).
+8.  **Result Relaying (Future Work):** Full relaying of processed results (DICOMs) and final status from backend through relay to the original client is a planned enhancement. Currently, the relay primarily confirms submission.
+
 ## Running the Applications
 
 ### Server (`server_app.py`)
@@ -162,8 +182,14 @@ python server_app.py
 ```
 Ensure `recon.opts` is configured, especially shared keys, paths, and resource limits.
 
+### Relay Server (`relay_server.py`)
+```bash
+python relay_server.py
+```
+Ensure `relay.opts` is configured, particularly all shared keys, backend server details, and temporary paths.
+
 ### Client (`client_app.py`)
-(Usage examples remain the same as previously documented for submitting jobs, viewing status, and queue.)
+(Usage examples remain the same as previously documented for submitting jobs, viewing status, and queue. When using with the relay, the client's `recon.opts` or connection parameters should point to the Relay Server's host and client-facing port, using `SHARED_KEY_RELAY_TO_CLIENTS`.)
 
 ## Administrative CLI Tools
 
@@ -196,9 +222,11 @@ Manages and monitors the relay server.
     python relay_server_cli.py backends --opts relay.opts
     ```
 
-## Example Jupyter Notebook (`example_usage.ipynb`)
+## Jupyter Notebook Examples
 
-An example Jupyter Notebook, `example_usage.ipynb`, is provided in the project root to demonstrate programmatic interaction with `server_app.py`.
+### Programmatic Interaction with `server_app.py` (`example_usage.ipynb`)
+
+An example Jupyter Notebook, `example_usage.ipynb`, is provided in the project root to demonstrate programmatic interaction directly with `server_app.py`.
 
 *   **Purpose**: Useful for testing, scripting batch submissions, or integrating server interactions into other Python workflows.
 *   **Demonstrates**:
@@ -208,19 +236,35 @@ An example Jupyter Notebook, `example_usage.ipynb`, is provided in the project r
     *   Querying server status and job queue details.
 *   **How to Run**:
     1.  Ensure `server_app.py` is running and `recon.opts` is correctly configured (especially `SERVER_HOSTNAME`, `SERVER_PORT`, and `SHARED_KEY`).
-    2.  Install Jupyter Notebook/Lab: `pip install notebook` or `pip install jupyterlab`.
-    3.  Navigate to the project root directory in your terminal.
-    4.  Run `jupyter notebook` or `jupyter lab`.
-    5.  Open `example_usage.ipynb` in the Jupyter interface and run the cells sequentially.
-    6.  The notebook creates dummy files locally for submission.
+    2.  Install Jupyter: `pip install notebook` or `pip install jupyterlab`.
+    3.  Navigate to the project root directory and run `jupyter notebook` or `jupyter lab`.
+    4.  Open `example_usage.ipynb` and run the cells sequentially. The notebook creates dummy files locally for submission.
+
+### Example: End-to-End Job Relaying (`example_relay_usage.ipynb`)
+
+For a more advanced demonstration, the `example_relay_usage.ipynb` notebook illustrates the job submission workflow using the `relay_server.py` as an intermediary between the client and a backend `server_app.py` reconstruction server.
+
+This example requires a multi-component setup:
+*   A running `server_app.py` instance (the backend).
+*   A running `relay_server.py` instance, configured to forward requests to the backend.
+*   The notebook itself, acting as the client submitting jobs to the relay.
+
+The notebook guides you through:
+*   Configuring the client to communicate with the relay server (by creating a temporary `client_to_relay.opts`).
+*   Submitting a sample job with input files and reconstruction options to the relay.
+*   Observing how the relay forwards this job to one of the configured backend servers.
+*   Receiving confirmation that the job has been successfully queued on the backend (includes `relay_job_id` and `backend_job_id`).
+*   Using the `relay_server_cli.py` and `server_admin_cli.py` (via conceptual examples or subprocess calls from the notebook) to monitor the status across the different components.
+
+Please refer to the notebook itself for detailed setup instructions and step-by-step explanations. Note that while this notebook demonstrates successful job submission and backend queuing via the relay, the full relaying of processed results (e.g., DICOM files) back from the backend to the original client is an advanced feature of the relay server that is currently under active development and may not be fully implemented in `relay_server.py`.
 
 ## Security
 
 *   **Encryption:** All communication relies on pre-shared Fernet keys.
-*   **Shared Keys:** Keep all shared keys (`SHARED_KEY`, `SERVER_ADMIN_SHARED_KEY`, `SHARED_KEY_RELAY_TO_CLIENTS`, `RELAY_ADMIN_SHARED_KEY`) secret and ensure they are unique for their respective purposes.
+*   **Shared Keys:** Keep all shared keys (`SHARED_KEY`, `SERVER_ADMIN_SHARED_KEY`, `SHARED_KEY_FOR_BACKENDS`, `SHARED_KEY_RELAY_TO_CLIENTS`, `RELAY_ADMIN_SHARED_KEY`) secret and ensure they are unique for their respective purposes.
 *   **Trusted IPs:** Use `TRUSTED_IPS` (in `recon.opts`) and `TRUSTED_CLIENT_IPS` (in `relay.opts`) for an additional layer of IP-based access control.
 *   **Logging**: Server logs are now in JSON format, which can be integrated with centralized logging systems for security monitoring.
 
 ---
-This README reflects the system's state after significant enhancements including admin CLIs, JSON logging, and resource management.
+This README reflects the system's state after significant enhancements including admin CLIs, JSON logging, resource management, and job relaying capabilities.
 ```
