@@ -758,4 +758,3 @@ if __name__ == "__main__":
         
         print(json.dumps({"timestamp": time.strftime('%Y-%m-%dT%H:%M:%S%z'), "level": "INFO", "name": "__main__", "message": "Application terminated."}))
 
-```
