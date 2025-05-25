@@ -113,15 +113,17 @@ def readoptions(optionfile: str):
     default_trusted_ips = "127.0.0.1,::1" # Added for completeness in defaults
 
     # Define default configuration for recon.opts
+    default_recon_job_output_base_dir = '/tmp/recon_server_job_outputs' # New default
     default_recon_options = {
         "SERVER_HOSTNAME": default_server_hostname,
         "SERVER_PORT": default_server_port,
         "LOG_FILEPATH": default_log_filepath,
         "SHARED_KEY": default_shared_key,
         "MAX_CONCURRENT_JOBS": default_max_concurrent_jobs,
-        "RECON_SERVER_BASE_PFILE_DIR": default_recon_server_temp_path, # Renamed
-        "RECON_SCRIPT_PATH": default_recon_script_name, # Renamed
-        "RECON_SERVER_DICOM_OUTPUT_DIR": default_recon_dicom_output_dir, # Renamed
+        "RECON_SERVER_BASE_PFILE_DIR": default_recon_server_temp_path, 
+        "RECON_SCRIPT_PATH": default_recon_script_name, 
+        "RECON_SERVER_DICOM_OUTPUT_DIR": default_recon_dicom_output_dir, # Retained for now, maybe for non-job-specific outputs or legacy
+        "RECON_JOB_OUTPUT_BASE_DIR": default_recon_job_output_base_dir, # New option
         "TRUSTED_IPS": default_trusted_ips,
         "CLIENT_DEFAULT_PFILE_NAME": default_client_pfile_name,
         "CLIENT_DEFAULT_PFILE_PATH": default_client_pfile_path,
@@ -139,6 +141,14 @@ def readoptions(optionfile: str):
         "CLIENT_DAEMON_STABILITY_DELAY": default_client_daemon_stability_delay,
         "CLIENT_DAEMON_GROUPING_TIMEOUT": default_client_daemon_grouping_timeout,
         "CLIENT_DAEMON_RECON_OPTIONS_JSON": default_client_daemon_recon_options_json,
+        # Resource Management Options for Server
+        "MAX_CPU_LOAD_PERCENT": 75, # Target maximum CPU load percentage
+        "MIN_AVAILABLE_MEMORY_MB": 500, # Minimum available memory in MB
+        "RESOURCE_CHECK_INTERVAL_SECONDS": 10, # How often to check resources when constrained
+        # Server Admin Interface Options
+        "SERVER_ADMIN_PORT": 60003, 
+        "SERVER_ADMIN_SHARED_KEY": "SET_YOUR_SERVER_ADMIN_KEY_HERE", # Must be different from main shared key
+        "LOG_LEVEL": "INFO", # Default logging level (DEBUG, INFO, WARNING, ERROR)
     }
 
     # Define default configuration for relay.opts
@@ -149,6 +159,10 @@ def readoptions(optionfile: str):
         "SHARED_KEY_RELAY_TO_CLIENTS": "SET_YOUR_RELAY_TO_CLIENTS_KEY_HERE",
         "BACKEND_SERVERS": "localhost:60000", # Comma-separated host:port
         "TRUSTED_CLIENT_IPS": "", # Comma-separated, blank for any. Example: "127.0.0.1,192.168.1.0/24"
+        # Admin Interface Options
+        "RELAY_ADMIN_PORT": 60002,
+        "RELAY_ADMIN_SHARED_KEY": "SET_YOUR_RELAY_ADMIN_KEY_HERE", # Must be different from client-facing key
+        "LOG_LEVEL": "INFO", # Default logging level
         # Potentially other relay-specific defaults like:
         # "RELAY_TEMP_DIR": "/tmp/relay_temp",
         # "HEALTH_CHECK_INTERVAL": 60, # seconds
@@ -171,7 +185,8 @@ def readoptions(optionfile: str):
                 opt_f.write(f"RELAY_HOSTNAME = {current_defaults['RELAY_HOSTNAME']}\n")
                 opt_f.write(f"RELAY_PORT = {current_defaults['RELAY_PORT']}\n\n")
                 opt_f.write("# Logging\n")
-                opt_f.write(f"LOG_FILEPATH = {current_defaults['LOG_FILEPATH']}\n\n")
+                opt_f.write(f"LOG_FILEPATH = {current_defaults['LOG_FILEPATH']}\n")
+                opt_f.write(f"LOG_LEVEL = {current_defaults.get('LOG_LEVEL', 'INFO')} # DEBUG, INFO, WARNING, ERROR\n\n")
                 opt_f.write("# Security\n")
                 opt_f.write(f"SHARED_KEY_RELAY_TO_CLIENTS = {current_defaults['SHARED_KEY_RELAY_TO_CLIENTS']}\n")
                 opt_f.write("# Comma-separated list of IPs or CIDR notations. Leave blank or comment out for no IP restriction.\n")
@@ -179,6 +194,9 @@ def readoptions(optionfile: str):
                 opt_f.write("# Backend Reconstruction Servers\n")
                 opt_f.write("# Comma-separated list of host:port pairs (e.g., server1.example.com:60000,server2.example.com:60000)\n")
                 opt_f.write(f"BACKEND_SERVERS = {current_defaults['BACKEND_SERVERS']}\n\n")
+                opt_f.write("# Relay Admin Interface (for relay_server_cli.py)\n")
+                opt_f.write(f"RELAY_ADMIN_PORT = {current_defaults['RELAY_ADMIN_PORT']}\n")
+                opt_f.write(f"RELAY_ADMIN_SHARED_KEY = {current_defaults['RELAY_ADMIN_SHARED_KEY']}\n\n")
                 # Add other relay-specific defaults here if any
                 # opt_f.write("# Optional: Temporary directory for relay operations\n")
                 # opt_f.write(f"#RELAY_TEMP_DIR = {current_defaults.get('RELAY_TEMP_DIR', '/tmp/relay_temp')}\n")
@@ -195,11 +213,19 @@ def readoptions(optionfile: str):
                 opt_f.write("# Paths\n")
                 opt_f.write(f"RECON_SERVER_BASE_PFILE_DIR = {current_defaults['RECON_SERVER_BASE_PFILE_DIR']}\n")
                 opt_f.write(f"RECON_SCRIPT_PATH = {current_defaults['RECON_SCRIPT_PATH']}\n")
-                opt_f.write(f"RECON_SERVER_DICOM_OUTPUT_DIR = {current_defaults['RECON_SERVER_DICOM_OUTPUT_DIR']}\n")
-                opt_f.write(f"LOG_FILEPATH = {current_defaults['LOG_FILEPATH']}\n\n")
+                opt_f.write("# Base directory for job-specific output subdirectories (e.g., where DICOMs for a job are written by the script)\n")
+                opt_f.write(f"RECON_JOB_OUTPUT_BASE_DIR = {current_defaults['RECON_JOB_OUTPUT_BASE_DIR']}\n")
+                opt_f.write("# Optional: General DICOM output directory (legacy or for non-job-specific outputs)\n")
+                opt_f.write(f"#RECON_SERVER_DICOM_OUTPUT_DIR = {current_defaults['RECON_SERVER_DICOM_OUTPUT_DIR']}\n")
+                opt_f.write(f"LOG_FILEPATH = {current_defaults['LOG_FILEPATH']}\n")
+                opt_f.write(f"LOG_LEVEL = {current_defaults.get('LOG_LEVEL', 'INFO')} # DEBUG, INFO, WARNING, ERROR\n\n")
 
                 opt_f.write("# Server Settings\n")
-                opt_f.write(f"MAX_CONCURRENT_JOBS = {current_defaults['MAX_CONCURRENT_JOBS']}\n\n")
+                opt_f.write(f"MAX_CONCURRENT_JOBS = {current_defaults['MAX_CONCURRENT_JOBS']}\n")
+                opt_f.write("# Resource Management: Server will pause polling for new jobs if these limits are exceeded.\n")
+                opt_f.write(f"MAX_CPU_LOAD_PERCENT = {current_defaults['MAX_CPU_LOAD_PERCENT']} # Avg CPU load threshold (e.g., 75 for 75%)\n")
+                opt_f.write(f"MIN_AVAILABLE_MEMORY_MB = {current_defaults['MIN_AVAILABLE_MEMORY_MB']} # Min RAM in MB (e.g., 500 for 500MB)\n")
+                opt_f.write(f"RESOURCE_CHECK_INTERVAL_SECONDS = {current_defaults['RESOURCE_CHECK_INTERVAL_SECONDS']} # Wait time in seconds if resources are constrained\n\n")
                 
                 opt_f.write("# Client Defaults\n")
                 opt_f.write(f"CLIENT_DEFAULT_PFILE_NAME = {current_defaults['CLIENT_DEFAULT_PFILE_NAME']}\n")
@@ -213,9 +239,13 @@ def readoptions(optionfile: str):
                 opt_f.write(f"# SOURCE_DATA_PATH = {current_defaults['SOURCE_DATA_PATH']}\n")
                 opt_f.write(f"# SCANNER_DICOM_SOURCE_DIR = {current_defaults['SCANNER_DICOM_SOURCE_DIR']}\n\n")
 
+                opt_f.write("# Server Admin Interface (for server_admin_cli.py)\n")
+                opt_f.write(f"SERVER_ADMIN_PORT = {current_defaults['SERVER_ADMIN_PORT']}\n")
+                opt_f.write(f"SERVER_ADMIN_SHARED_KEY = {current_defaults['SERVER_ADMIN_SHARED_KEY']}\n\n")
+
                 opt_f.write("# Client Daemon Specific Options (for client_daemon.py)\n")
                 opt_f.write("# Directory for the client daemon to monitor for new files (leave empty to disable daemon watch feature)\n")
-                opt_f.write(f"CLIENT_WATCH_DIRECTORY = {current_defaults['CLIENT_WATCH_DIRECTORY']}\n") 
+                opt_f.write(f"CLIENT_WATCH_DIRECTORY = {current_defaults['CLIENT_WATCH_DIRECTORY']}\n")
                 opt_f.write("# File pattern for the daemon to look for in the watch directory (e.g., *.dcm, P*.7)\n")
                 opt_f.write(f"CLIENT_WATCH_PATTERN = \"{current_defaults['CLIENT_WATCH_PATTERN']}\"\n") 
                 opt_f.write("# Time (seconds) for daemon to wait after file detection for file to stabilize before processing\n")
@@ -286,6 +316,13 @@ def readoptions(optionfile: str):
         if not options.get("BACKEND_SERVERS"): # Must have at least one backend
              print(f"Warning: 'BACKEND_SERVERS' is not configured in '{optionfile}'. Using default '{default_relay_options['BACKEND_SERVERS']}'.")
              options["BACKEND_SERVERS"] = default_relay_options['BACKEND_SERVERS']
+        if not options.get("RELAY_ADMIN_SHARED_KEY") or options["RELAY_ADMIN_SHARED_KEY"] == "SET_YOUR_RELAY_ADMIN_KEY_HERE":
+            if options.get("RELAY_ADMIN_SHARED_KEY") != default_relay_options["RELAY_ADMIN_SHARED_KEY"]:
+                 print(f"Warning: 'RELAY_ADMIN_SHARED_KEY' is not configured or still set to placeholder in '{optionfile}'. THIS IS INSECURE for the admin interface.")
+            options["RELAY_ADMIN_SHARED_KEY"] = default_relay_options["RELAY_ADMIN_SHARED_KEY"]
+        if not isinstance(options.get("RELAY_ADMIN_PORT"), int):
+            print(f"Warning: RELAY_ADMIN_PORT is missing or invalid. Using default {default_relay_options['RELAY_ADMIN_PORT']}.")
+            options["RELAY_ADMIN_PORT"] = default_relay_options['RELAY_ADMIN_PORT']
 
     else: # recon.opts and other files
         if not options.get("SHARED_KEY") or options["SHARED_KEY"] == "SET_YOUR_SHARED_KEY_HERE":
@@ -304,6 +341,15 @@ def readoptions(optionfile: str):
         elif options["MAX_CONCURRENT_JOBS"] <= 0:
             print(f"Warning: MAX_CONCURRENT_JOBS must be positive (was {options['MAX_CONCURRENT_JOBS']}). Using default {default_recon_options['MAX_CONCURRENT_JOBS']}.")
             options["MAX_CONCURRENT_JOBS"] = default_recon_options['MAX_CONCURRENT_JOBS']
+        
+        # Server admin specific checks
+        if not options.get("SERVER_ADMIN_SHARED_KEY") or options["SERVER_ADMIN_SHARED_KEY"] == "SET_YOUR_SERVER_ADMIN_KEY_HERE":
+            if options.get("SERVER_ADMIN_SHARED_KEY") != default_recon_options["SERVER_ADMIN_SHARED_KEY"]: # Avoid re-warning if it's already the default placeholder
+                 print(f"Warning: 'SERVER_ADMIN_SHARED_KEY' is not configured or still set to placeholder in '{optionfile}'. THIS IS INSECURE for the admin interface.")
+            options["SERVER_ADMIN_SHARED_KEY"] = default_recon_options["SERVER_ADMIN_SHARED_KEY"]
+        if not isinstance(options.get("SERVER_ADMIN_PORT"), int):
+            print(f"Warning: SERVER_ADMIN_PORT is missing or invalid. Using default {default_recon_options['SERVER_ADMIN_PORT']}.")
+            options["SERVER_ADMIN_PORT"] = default_recon_options['SERVER_ADMIN_PORT']
 
 
     return options
