@@ -163,8 +163,9 @@ def readoptions(optionfile: str):
         "RELAY_ADMIN_PORT": 60002,
         "RELAY_ADMIN_SHARED_KEY": "SET_YOUR_RELAY_ADMIN_KEY_HERE", # Must be different from client-facing key
         "LOG_LEVEL": "INFO", # Default logging level
+        "SHARED_KEY_FOR_BACKENDS": "SET_YOUR_BACKEND_SERVERS_SHARED_KEY_HERE", # Key for relay to connect to backend servers
+        "RELAY_JOB_TEMP_DIR": "/tmp/relay_job_files", # Temp storage for files being relayed
         # Potentially other relay-specific defaults like:
-        # "RELAY_TEMP_DIR": "/tmp/relay_temp",
         # "HEALTH_CHECK_INTERVAL": 60, # seconds
         # "LOAD_BALANCING_STRATEGY": "round_robin", # or "random", "least_connections"
     }
@@ -197,9 +198,10 @@ def readoptions(optionfile: str):
                 opt_f.write("# Relay Admin Interface (for relay_server_cli.py)\n")
                 opt_f.write(f"RELAY_ADMIN_PORT = {current_defaults['RELAY_ADMIN_PORT']}\n")
                 opt_f.write(f"RELAY_ADMIN_SHARED_KEY = {current_defaults['RELAY_ADMIN_SHARED_KEY']}\n\n")
+                opt_f.write("# Relay to Backend Communication\n")
+                opt_f.write(f"SHARED_KEY_FOR_BACKENDS = {current_defaults['SHARED_KEY_FOR_BACKENDS']}\n")
+                opt_f.write(f"RELAY_JOB_TEMP_DIR = {current_defaults['RELAY_JOB_TEMP_DIR']}\n\n")
                 # Add other relay-specific defaults here if any
-                # opt_f.write("# Optional: Temporary directory for relay operations\n")
-                # opt_f.write(f"#RELAY_TEMP_DIR = {current_defaults.get('RELAY_TEMP_DIR', '/tmp/relay_temp')}\n")
             else: # recon.opts or other files
                 opt_f.write("# Server Configuration\n")
                 opt_f.write(f"SERVER_HOSTNAME = {current_defaults['SERVER_HOSTNAME']}\n")
@@ -323,6 +325,14 @@ def readoptions(optionfile: str):
         if not isinstance(options.get("RELAY_ADMIN_PORT"), int):
             print(f"Warning: RELAY_ADMIN_PORT is missing or invalid. Using default {default_relay_options['RELAY_ADMIN_PORT']}.")
             options["RELAY_ADMIN_PORT"] = default_relay_options['RELAY_ADMIN_PORT']
+        if not options.get("SHARED_KEY_FOR_BACKENDS") or options["SHARED_KEY_FOR_BACKENDS"] == "SET_YOUR_BACKEND_SERVERS_SHARED_KEY_HERE":
+            if options.get("SHARED_KEY_FOR_BACKENDS") != default_relay_options["SHARED_KEY_FOR_BACKENDS"]:
+                 print(f"Warning: 'SHARED_KEY_FOR_BACKENDS' is not configured or still set to placeholder in '{optionfile}'. This is required for relay to backend communication.")
+            options["SHARED_KEY_FOR_BACKENDS"] = default_relay_options["SHARED_KEY_FOR_BACKENDS"]
+        if not options.get("RELAY_JOB_TEMP_DIR"):
+            print(f"Warning: 'RELAY_JOB_TEMP_DIR' is not configured. Using default '{default_relay_options['RELAY_JOB_TEMP_DIR']}'.")
+            options["RELAY_JOB_TEMP_DIR"] = default_relay_options['RELAY_JOB_TEMP_DIR']
+
 
     else: # recon.opts and other files
         if not options.get("SHARED_KEY") or options["SHARED_KEY"] == "SET_YOUR_SHARED_KEY_HERE":
