@@ -825,7 +825,7 @@ class SecureFileTransferServer:
             print(f"Client {client_addr} did not properly acknowledge command '{command}'. Received: {response}")
             return None
 
-    def receive_file_securely(self, conn: socket.socket, expected_filename: str | None = None) -> str | None:
+    def receive_file_securely(self, conn: socket.socket, expected_filename: str | None = None, save_dir_override: str | None = None) -> str | None:
         """
         Dedicated method to receive a single file from a client.
         Assumes the client has been prompted (e.g., by request_file_from_client) 
@@ -836,6 +836,7 @@ class SecureFileTransferServer:
             conn: The client socket connection.
             expected_filename: The basename of the file expected from the client. 
                                If provided, the received filename must match.
+            save_dir_override: If provided, save the file to this directory instead of self.download_dir.
 
         Returns:
             The full path to the saved file if successful, None otherwise.
@@ -907,7 +908,20 @@ class SecureFileTransferServer:
                         self._send_message(conn, "ack_file_transfer_start", {"filename": actual_filename, "status": "error", "detail": f"Unexpected filename. Expected {expected_filename}."})
                         return None
                     
-                    filepath = os.path.join(self.download_dir, os.path.basename(actual_filename))
+                    # Determine the target directory for saving the file
+                    target_save_dir = self.download_dir
+                    if save_dir_override:
+                        target_save_dir = save_dir_override
+                    
+                    # Ensure the target directory exists
+                    try:
+                        os.makedirs(target_save_dir, exist_ok=True)
+                    except OSError as e_mkdir:
+                        print(f"[{client_addr}] Error creating directory {target_save_dir}: {e_mkdir}")
+                        self._send_message(conn, "ack_file_transfer_start", {"filename": actual_filename, "status": "error", "detail": f"Server cannot create save directory: {e_mkdir}"})
+                        return None
+
+                    filepath = os.path.join(target_save_dir, os.path.basename(actual_filename))
                     try:
                         file_obj = open(filepath, "wb")
                         client_state["receiving_file_info"] = {

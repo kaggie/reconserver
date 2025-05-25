@@ -7,11 +7,9 @@ This module provides core functionalities for:
 - Cryptographic operations: generating Fernet keys, encrypting, and decrypting data
   for secure communication.
 """
-
-# No socket import needed here anymore as network ops are in secure_transfer.py
-# import socket
+import os
+import re # For parsing key-value pairs
 from cryptography.fernet import Fernet, InvalidToken
-
 
 # To generate a new key for recon.opts:
 # from reconlibs import generate_key
@@ -63,186 +61,251 @@ def readoptions(optionfile: str):
     """
     Reads options from the specified file.
     Writes default options if the file does not exist.
-
-    Args:
-        optionfile: The path to the options file (e.g., "recon.opts").
-
-    Returns:
-        A tuple containing all the configuration options:
-        (server_hostname, server_port, scanner_username, scanner_password,
-         ssh_port, source_data_path, recon_server_temp_path, recon_script_name,
-         recon_dicom_output_dir, scanner_dicom_source_dir, log_filepath,
-         shared_key, misc_options_lines)
+    Order of returned values (20 elements):
+    0: server_hostname (str)
+    1: server_port (int)
+    2: scanner_username (str) - Legacy
+    3: scanner_password (str) - Legacy
+    4: ssh_port (int) - Legacy
+    5: source_data_path (str) - Legacy
+    6: recon_server_temp_path (str) - Server's PFILE download/work dir (base for job dirs)
+    7: recon_script_name (str) - Main recon script on server
+    8: recon_dicom_output_dir (str) - Server's DICOM output dir
+    9: scanner_dicom_source_dir (str) - Legacy
+    10: log_filepath (str) - Common log file path for client and server apps
+    11: shared_key (str)
+    12: max_concurrent_jobs (int) - Server setting
+    13: client_watch_directory (str) - Daemon setting
+    14: client_watch_pattern (str) - Daemon setting
+    15: client_daemon_poll_interval (int) - Daemon setting (seconds, fallback)
+    16: client_daemon_stability_delay (int) - Daemon setting (seconds)
+    17: client_daemon_grouping_timeout (int) - Daemon setting (seconds)
+    18: client_daemon_recon_options_json (str) - Daemon setting (JSON string)
+    19: misc_options_lines (list[str]) - Unparsed/comment lines from the end of the file
     """
-    # Default values
+    # Default values for primary options
     default_server_hostname = 'localhost'
     default_server_port = 60000
-    default_scanner_username = 'sdc'
-    default_scanner_password = 'adw2.0' # Consider security implications of default passwords
-    default_ssh_port = 22
-    default_source_data_path = '/usr/g/mrraw/'
-    default_recon_server_temp_path = '/tmp/recon_server_pfiles' # Server's PFILE download/work dir
-    default_recon_script_name = 'default_recon_script.sh' # Example: matlab_script.m or python_script.py
-    default_recon_dicom_output_dir = '/tmp/recon_server_dicoms' # Server's DICOM output dir (source for sending to client)
-    default_scanner_dicom_source_dir = '/tmp/scanner_dicoms/' # Less relevant now, client sends PFILE
-    default_log_filepath = '/tmp/recon_project.log' # Unified log file name
-    default_shared_key = "SET_YOUR_SHARED_KEY_HERE" # Emphasize that this needs to be set
-    default_trusted_ips = "127.0.0.1,::1" # Example for localhost IPv4 and IPv6
+    default_scanner_username = 'sdc' 
+    default_scanner_password = 'adw2.0'
+    default_ssh_port = 22 
+    default_source_data_path = '/usr/g/mrraw/' 
+    default_recon_server_temp_path = '/tmp/recon_server_pfiles'
+    default_recon_script_name = 'default_recon_script.sh'
+    default_recon_dicom_output_dir = '/tmp/recon_server_dicoms'
+    default_scanner_dicom_source_dir = '/tmp/scanner_dicoms/' 
+    default_log_filepath = '/tmp/recon_project.log' 
+    default_shared_key = "SET_YOUR_SHARED_KEY_HERE"
+    default_max_concurrent_jobs = 1
+    
+    # Defaults for client app (can be overridden by misc options in recon.opts)
     default_client_pfile_name = "P00000.7"
     default_client_pfile_path = "/tmp/default_pfile_on_client/P00000.7"
+    default_client_download_dir = "client_downloads"
 
+    # Defaults for new client daemon options
+    default_client_watch_directory = "" 
+    default_client_watch_pattern = "*.7"
+    default_client_daemon_poll_interval = 10  # Not actively used by watchdog version but good for reference
+    default_client_daemon_stability_delay = 5 
+    default_client_daemon_grouping_timeout = 5
+    default_client_daemon_recon_options_json = "{}"
+    default_trusted_ips = "127.0.0.1,::1" # Added for completeness in defaults
 
-    try:
-        with open(optionfile, 'r') as opt_f:
-            server_hostname = opt_f.readline().strip()
-            server_port = int(opt_f.readline().strip())
-            scanner_username = opt_f.readline().strip()
-            scanner_password = opt_f.readline().strip()
-            ssh_port = int(opt_f.readline().strip())
-            source_data_path = opt_f.readline().strip()
-            recon_server_temp_path = opt_f.readline().strip()
-            recon_script_name = opt_f.readline().strip()
-            recon_dicom_output_dir = opt_f.readline().strip()
-            scanner_dicom_source_dir = opt_f.readline().strip()
-            log_filepath = opt_f.readline().strip()
-            
-            shared_key_line = opt_f.readline().strip()
-            if shared_key_line.startswith("SHARED_KEY ="):
-                shared_key = shared_key_line.split('=', 1)[1].strip()
-            else: # Handle older format or error
-                print(f"Warning: SHARED_KEY line in '{optionfile}' might be malformed. Attempting to read as raw key.")
-                shared_key = shared_key_line # Assume it's just the key
-            
-            misc_options_lines = opt_f.readlines() # Read all remaining lines for other options
+    # Define default configuration for recon.opts
+    default_recon_options = {
+        "SERVER_HOSTNAME": default_server_hostname,
+        "SERVER_PORT": default_server_port,
+        "LOG_FILEPATH": default_log_filepath,
+        "SHARED_KEY": default_shared_key,
+        "MAX_CONCURRENT_JOBS": default_max_concurrent_jobs,
+        "RECON_SERVER_BASE_PFILE_DIR": default_recon_server_temp_path, # Renamed
+        "RECON_SCRIPT_PATH": default_recon_script_name, # Renamed
+        "RECON_SERVER_DICOM_OUTPUT_DIR": default_recon_dicom_output_dir, # Renamed
+        "TRUSTED_IPS": default_trusted_ips,
+        "CLIENT_DEFAULT_PFILE_NAME": default_client_pfile_name,
+        "CLIENT_DEFAULT_PFILE_PATH": default_client_pfile_path,
+        "CLIENT_DOWNLOAD_DIR": default_client_download_dir,
+        # Legacy options (will be commented out in default file)
+        "SCANNER_USERNAME": default_scanner_username,
+        "SCANNER_PASSWORD": default_scanner_password,
+        "SSH_PORT": default_ssh_port,
+        "SOURCE_DATA_PATH": default_source_data_path,
+        "SCANNER_DICOM_SOURCE_DIR": default_scanner_dicom_source_dir,
+        # Client Daemon options (will be commented out or have defaults)
+        "CLIENT_WATCH_DIRECTORY": default_client_watch_directory,
+        "CLIENT_WATCH_PATTERN": default_client_watch_pattern,
+        "CLIENT_DAEMON_POLL_INTERVAL": default_client_daemon_poll_interval,
+        "CLIENT_DAEMON_STABILITY_DELAY": default_client_daemon_stability_delay,
+        "CLIENT_DAEMON_GROUPING_TIMEOUT": default_client_daemon_grouping_timeout,
+        "CLIENT_DAEMON_RECON_OPTIONS_JSON": default_client_daemon_recon_options_json,
+    }
 
-    except FileNotFoundError:
-        print(f"Warning: Options file '{optionfile}' not found. Creating with default values.")
-        # Assign defaults for return values
-        server_hostname = default_server_hostname
-        server_port = default_server_port
-        scanner_username = default_scanner_username
-        scanner_password = default_scanner_password
-        ssh_port = default_ssh_port
-        source_data_path = default_source_data_path
-        recon_server_temp_path = default_recon_server_temp_path
-        recon_script_name = default_recon_script_name
-        recon_dicom_output_dir = default_recon_dicom_output_dir
-        scanner_dicom_source_dir = default_scanner_dicom_source_dir
-        log_filepath = default_log_filepath
-        shared_key = default_shared_key # Will be written as placeholder
-        misc_options_lines = [ # These will form the basis for the tail of the new default file
-            f"# TRUSTEDIPS: {default_trusted_ips}\n",
-            f"# CLIENT_DEFAULT_PFILE_NAME = {default_client_pfile_name}\n",
-            f"# CLIENT_DEFAULT_PFILE_PATH = {default_client_pfile_path}\n"
-        ]
+    # Define default configuration for relay.opts
+    default_relay_options = {
+        "RELAY_HOSTNAME": "localhost",
+        "RELAY_PORT": 60001,
+        "LOG_FILEPATH": "/tmp/relay_server.log",
+        "SHARED_KEY_RELAY_TO_CLIENTS": "SET_YOUR_RELAY_TO_CLIENTS_KEY_HERE",
+        "BACKEND_SERVERS": "localhost:60000", # Comma-separated host:port
+        "TRUSTED_CLIENT_IPS": "", # Comma-separated, blank for any. Example: "127.0.0.1,192.168.1.0/24"
+        # Potentially other relay-specific defaults like:
+        # "RELAY_TEMP_DIR": "/tmp/relay_temp",
+        # "HEALTH_CHECK_INTERVAL": 60, # seconds
+        # "LOAD_BALANCING_STRATEGY": "round_robin", # or "random", "least_connections"
+    }
+    
+    current_defaults = {}
+    if optionfile == 'relay.opts':
+        current_defaults = default_relay_options
+    else: # Default to recon.opts behavior for any other filename
+        current_defaults = default_recon_options
 
+    options = current_defaults.copy() # Start with defaults, override with file contents
+
+    if not os.path.exists(optionfile):
+        print(f"Options file '{optionfile}' not found. Creating with default values for '{os.path.basename(optionfile)}'.")
         with open(optionfile, 'w') as opt_f:
-            opt_f.write(f"# Recon server IP address or hostname (e.g., localhost, 192.168.1.100)\n{server_hostname}\n")
-            opt_f.write(f"# Port for recon server communication (e.g., 60000)\n{server_port}\n")
-            opt_f.write(f"# Username for scanner authentication (legacy, may not be used by current server)\n{scanner_username}\n")
-            opt_f.write(f"# Password for scanner authentication (legacy, may not be used by current server)\n{scanner_password}\n")
-            opt_f.write(f"# SSH port for secure shell access (legacy, currently unused by server_app)\n{ssh_port}\n")
-            opt_f.write(f"# Path to source data (legacy, MRRAW directory, less relevant if PFILE sent by client)\n{source_data_path}\n")
-            opt_f.write(f"# Server's directory for downloaded PFILEs and temporary recon files\n{recon_server_temp_path}\n")
-            opt_f.write(f"# Full path or name of the reconstruction script on the server (e.g., /opt/scripts/matlab_recon.sh or python_recon.py)\n{recon_script_name}\n")
-            opt_f.write(f"# Server's directory where reconstructed DICOMs are stored (and from where they are sent to client)\n{recon_dicom_output_dir}\n")
-            opt_f.write(f"# Scanner's DICOM directory (legacy, less relevant if DICOMs are sent back to client)\n{scanner_dicom_source_dir}\n")
-            opt_f.write(f"# Path to the log file for server and client applications\n{log_filepath}\n")
-            opt_f.write(f"# --- Secure Transfer Options ---\n")
-            opt_f.write(f"# SHARED_KEY: A securely generated Fernet key for encrypting transfers.\n")
-            opt_f.write(f"# IMPORTANT: Generate using: python -c \"from reconlibs import generate_key; print(generate_key())\"\n")
-            opt_f.write(f"# Copy the output key and paste it here, replacing the placeholder.\n")
-            opt_f.write(f"# This key MUST be identical on both the client and server.\n")
-            opt_f.write(f"SHARED_KEY = {shared_key}\n") # Writes the placeholder default_shared_key initially
-            opt_f.write(f"# --- Server Options ---\n")
-            opt_f.write(f"# TRUSTEDIPS: Comma-separated list of client IP addresses allowed to connect to the server.\n")
-            opt_f.write(f"# Example: #TRUSTEDIPS: 192.168.1.101,192.168.1.102\n")
-            opt_f.write(f"# If commented out or empty, the server may allow all IPs (check server_app logic).\n")
-            opt_f.write(f"{misc_options_lines[0].strip()}\n") # Default TRUSTEDIPS line
-            opt_f.write(f"# --- Client Options ---\n")
-            opt_f.write(f"# CLIENT_DEFAULT_PFILE_NAME: Default PFILE name for the client application if not specified on command line.\n")
-            opt_f.write(f"CLIENT_DEFAULT_PFILE_NAME = {default_client_pfile_name}\n")
-            opt_f.write(f"# CLIENT_DEFAULT_PFILE_PATH: Default full path to the PFILE on the client machine if not specified on command line.\n")
-            opt_f.write(f"CLIENT_DEFAULT_PFILE_PATH = {default_client_pfile_path}\n")
-            opt_f.write(f"# --- Other Misc Options (add as KEY = VALUE or #COMMENT) ---\n")
-            # Write any other misc options that were part of the default generation if needed
-            for line in misc_options_lines[1:]: # Skip TRUSTEDIPS as it's handled
-                if "CLIENT_DEFAULT_PFILE_NAME" not in line and "CLIENT_DEFAULT_PFILE_PATH" not in line:
-                    opt_f.write(line)
-        print(f"A new default options file was created at '{optionfile}'. Please review and configure it, especially SHARED_KEY.")
+            if optionfile == 'relay.opts':
+                opt_f.write("# Relay Server Configuration\n")
+                opt_f.write(f"RELAY_HOSTNAME = {current_defaults['RELAY_HOSTNAME']}\n")
+                opt_f.write(f"RELAY_PORT = {current_defaults['RELAY_PORT']}\n\n")
+                opt_f.write("# Logging\n")
+                opt_f.write(f"LOG_FILEPATH = {current_defaults['LOG_FILEPATH']}\n\n")
+                opt_f.write("# Security\n")
+                opt_f.write(f"SHARED_KEY_RELAY_TO_CLIENTS = {current_defaults['SHARED_KEY_RELAY_TO_CLIENTS']}\n")
+                opt_f.write("# Comma-separated list of IPs or CIDR notations. Leave blank or comment out for no IP restriction.\n")
+                opt_f.write(f"#TRUSTED_CLIENT_IPS = {current_defaults.get('TRUSTED_CLIENT_IPS', '127.0.0.1,192.168.1.0/24')}\n\n") # Example in comment
+                opt_f.write("# Backend Reconstruction Servers\n")
+                opt_f.write("# Comma-separated list of host:port pairs (e.g., server1.example.com:60000,server2.example.com:60000)\n")
+                opt_f.write(f"BACKEND_SERVERS = {current_defaults['BACKEND_SERVERS']}\n\n")
+                # Add other relay-specific defaults here if any
+                # opt_f.write("# Optional: Temporary directory for relay operations\n")
+                # opt_f.write(f"#RELAY_TEMP_DIR = {current_defaults.get('RELAY_TEMP_DIR', '/tmp/relay_temp')}\n")
+            else: # recon.opts or other files
+                opt_f.write("# Server Configuration\n")
+                opt_f.write(f"SERVER_HOSTNAME = {current_defaults['SERVER_HOSTNAME']}\n")
+                opt_f.write(f"SERVER_PORT = {current_defaults['SERVER_PORT']}\n\n")
 
-    except Exception as e:
-        print(f"Error reading options file '{optionfile}': {e}. Returning hardcoded defaults as a last resort.")
-        # Fallback to hardcoded defaults if any other error occurs during reading/writing
-        server_hostname = default_server_hostname
-        server_port = default_server_port
-        scanner_username = default_scanner_username
-        scanner_password = default_scanner_password
-        ssh_port = default_ssh_port
-        source_data_path = default_source_data_path
-        recon_server_temp_path = default_recon_server_temp_path
-        recon_script_name = default_recon_script_name
-        recon_dicom_output_dir = default_recon_dicom_output_dir
-        scanner_dicom_source_dir = default_scanner_dicom_source_dir
-        log_filepath = default_log_filepath
-        shared_key = default_shared_key # Return the placeholder if file ops failed
-        misc_options_lines = [ # Minimal misc options if all else fails
-            f"# TRUSTEDIPS: {default_trusted_ips}\n",
-            f"CLIENT_DEFAULT_PFILE_NAME = {default_client_pfile_name}\n",
-            f"CLIENT_DEFAULT_PFILE_PATH = {default_client_pfile_path}\n"
-        ]
+                opt_f.write("# Security\n")
+                opt_f.write(f"SHARED_KEY = {current_defaults['SHARED_KEY']}\n")
+                opt_f.write("# Comma-separated list of IPs, or leave blank for no restriction\n")
+                opt_f.write(f"TRUSTED_IPS = {current_defaults['TRUSTED_IPS']}\n\n")
 
-    return (
-        server_hostname, server_port, scanner_username, scanner_password,
-        ssh_port, source_data_path, recon_server_temp_path, recon_script_name,
-        recon_dicom_output_dir, scanner_dicom_source_dir, log_filepath,
-        shared_key, misc_options_lines
-    )
+                opt_f.write("# Paths\n")
+                opt_f.write(f"RECON_SERVER_BASE_PFILE_DIR = {current_defaults['RECON_SERVER_BASE_PFILE_DIR']}\n")
+                opt_f.write(f"RECON_SCRIPT_PATH = {current_defaults['RECON_SCRIPT_PATH']}\n")
+                opt_f.write(f"RECON_SERVER_DICOM_OUTPUT_DIR = {current_defaults['RECON_SERVER_DICOM_OUTPUT_DIR']}\n")
+                opt_f.write(f"LOG_FILEPATH = {current_defaults['LOG_FILEPATH']}\n\n")
+
+                opt_f.write("# Server Settings\n")
+                opt_f.write(f"MAX_CONCURRENT_JOBS = {current_defaults['MAX_CONCURRENT_JOBS']}\n\n")
+                
+                opt_f.write("# Client Defaults\n")
+                opt_f.write(f"CLIENT_DEFAULT_PFILE_NAME = {current_defaults['CLIENT_DEFAULT_PFILE_NAME']}\n")
+                opt_f.write(f"CLIENT_DEFAULT_PFILE_PATH = {current_defaults['CLIENT_DEFAULT_PFILE_PATH']}\n")
+                opt_f.write(f"CLIENT_DOWNLOAD_DIR = {current_defaults['CLIENT_DOWNLOAD_DIR']}\n\n")
+
+                opt_f.write("# Legacy options (commented out or with defaults)\n")
+                opt_f.write(f"# SCANNER_USERNAME = {current_defaults['SCANNER_USERNAME']}\n")
+                opt_f.write(f"# SCANNER_PASSWORD = {current_defaults['SCANNER_PASSWORD']}\n")
+                opt_f.write(f"# SSH_PORT = {current_defaults['SSH_PORT']}\n")
+                opt_f.write(f"# SOURCE_DATA_PATH = {current_defaults['SOURCE_DATA_PATH']}\n")
+                opt_f.write(f"# SCANNER_DICOM_SOURCE_DIR = {current_defaults['SCANNER_DICOM_SOURCE_DIR']}\n\n")
+
+                opt_f.write("# Client Daemon Specific Options (for client_daemon.py)\n")
+                opt_f.write("# Directory for the client daemon to monitor for new files (leave empty to disable daemon watch feature)\n")
+                opt_f.write(f"CLIENT_WATCH_DIRECTORY = {current_defaults['CLIENT_WATCH_DIRECTORY']}\n") 
+                opt_f.write("# File pattern for the daemon to look for in the watch directory (e.g., *.dcm, P*.7)\n")
+                opt_f.write(f"CLIENT_WATCH_PATTERN = \"{current_defaults['CLIENT_WATCH_PATTERN']}\"\n") 
+                opt_f.write("# Time (seconds) for daemon to wait after file detection for file to stabilize before processing\n")
+                opt_f.write(f"CLIENT_DAEMON_STABILITY_DELAY = {current_defaults['CLIENT_DAEMON_STABILITY_DELAY']}\n")
+                opt_f.write("# Time (seconds) for daemon to wait to group multiple files detected close together for a single job\n")
+                opt_f.write(f"CLIENT_DAEMON_GROUPING_TIMEOUT = {current_defaults['CLIENT_DAEMON_GROUPING_TIMEOUT']}\n")
+                opt_f.write("# Default reconstruction options (JSON string) for jobs submitted by the daemon\n")
+                opt_f.write(f"CLIENT_DAEMON_RECON_OPTIONS_JSON = '{current_defaults['CLIENT_DAEMON_RECON_OPTIONS_JSON']}'\n") 
+                opt_f.write("# Fallback poll interval if watchdog is not used (seconds) - Not actively used by current watchdog handler\n")
+                opt_f.write(f"CLIENT_DAEMON_POLL_INTERVAL = {current_defaults['CLIENT_DAEMON_POLL_INTERVAL']}\n")
+
+        print(f"A new default options file was created at '{optionfile}'. Please review and configure it.")
+        # When file is newly created, 'options' (which is a copy of current_defaults) holds the correct defaults.
+    else: # Option file exists, parse it
+        # Initialize options with the correct set of defaults before parsing,
+        # so that parsing only overrides what's in the file.
+        if optionfile == 'relay.opts':
+            options = default_relay_options.copy()
+        else:
+            options = default_recon_options.copy()
+            
+        with open(optionfile, 'r') as opt_f:
+            for line_number, line_content in enumerate(opt_f, 1):
+                line_content = line_content.strip()
+
+                if not line_content or line_content.startswith("#"):
+                    continue # Skip blank lines and comments
+
+                key_value_match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=\s*(.*)", line_content)
+                if key_value_match:
+                    key = key_value_match.group(1).strip().upper()
+                    value_str = key_value_match.group(2).strip()
+
+                    # Attempt to infer type
+                    if value_str.lower() == 'true':
+                        value = True
+                    elif value_str.lower() == 'false':
+                        value = False
+                    elif value_str.isdigit() or (value_str.startswith('-') and value_str[1:].isdigit()):
+                        try:
+                            value = int(value_str)
+                        except ValueError: # Should not happen with isdigit but as safeguard
+                            value = value_str 
+                    elif value_str.startswith('"') and value_str.endswith('"'):
+                        value = value_str[1:-1] # Remove surrounding quotes
+                    elif value_str.startswith("'") and value_str.endswith("'"):
+                        value = value_str[1:-1] # Remove surrounding quotes
+                    else:
+                        value = value_str
+                    
+                    if key in options: # Update if key is known from defaults
+                        options[key] = value
+                    else: # A new key not in defaults
+                        print(f"Warning: Unknown option '{key}' found in '{optionfile}' on line {line_number}. It will be added to the options dictionary.")
+                        options[key] = value
+                else:
+                    print(f"Warning: Malformed line in '{optionfile}' on line {line_number}: '{line_content}'. Skipping.")
+    
+    # Ensure critical keys have sane values after parsing, specific to the type of option file
+    if optionfile == 'relay.opts':
+        if not options.get("SHARED_KEY_RELAY_TO_CLIENTS") or options["SHARED_KEY_RELAY_TO_CLIENTS"] == "SET_YOUR_RELAY_TO_CLIENTS_KEY_HERE":
+            if options.get("SHARED_KEY_RELAY_TO_CLIENTS") != default_relay_options["SHARED_KEY_RELAY_TO_CLIENTS"]:
+                 print(f"Warning: 'SHARED_KEY_RELAY_TO_CLIENTS' is not configured or still set to placeholder in '{optionfile}'. THIS IS INSECURE.")
+            options["SHARED_KEY_RELAY_TO_CLIENTS"] = default_relay_options["SHARED_KEY_RELAY_TO_CLIENTS"]
+        if not isinstance(options.get("RELAY_PORT"), int):
+            print(f"Warning: RELAY_PORT is missing or invalid. Using default {default_relay_options['RELAY_PORT']}.")
+            options["RELAY_PORT"] = default_relay_options['RELAY_PORT']
+        if not options.get("BACKEND_SERVERS"): # Must have at least one backend
+             print(f"Warning: 'BACKEND_SERVERS' is not configured in '{optionfile}'. Using default '{default_relay_options['BACKEND_SERVERS']}'.")
+             options["BACKEND_SERVERS"] = default_relay_options['BACKEND_SERVERS']
+
+    else: # recon.opts and other files
+        if not options.get("SHARED_KEY") or options["SHARED_KEY"] == "SET_YOUR_SHARED_KEY_HERE":
+            if options.get("SHARED_KEY") != default_recon_options["SHARED_KEY"]: 
+                 print(f"Warning: 'SHARED_KEY' is not configured or still set to placeholder in '{optionfile}'. THIS IS INSECURE.")
+            options["SHARED_KEY"] = default_recon_options["SHARED_KEY"] 
+
+        if not isinstance(options.get("SERVER_PORT"), int):
+            print(f"Warning: SERVER_PORT is missing or invalid. Using default {default_recon_options['SERVER_PORT']}.")
+            options["SERVER_PORT"] = default_recon_options['SERVER_PORT']
+            
+        if not isinstance(options.get("MAX_CONCURRENT_JOBS"), int):
+            mcj_val = options.get("MAX_CONCURRENT_JOBS", default_recon_options['MAX_CONCURRENT_JOBS'])
+            print(f"Warning: MAX_CONCURRENT_JOBS is missing or invalid ('{mcj_val}'). Using default {default_recon_options['MAX_CONCURRENT_JOBS']}.")
+            options["MAX_CONCURRENT_JOBS"] = default_recon_options['MAX_CONCURRENT_JOBS']
+        elif options["MAX_CONCURRENT_JOBS"] <= 0:
+            print(f"Warning: MAX_CONCURRENT_JOBS must be positive (was {options['MAX_CONCURRENT_JOBS']}). Using default {default_recon_options['MAX_CONCURRENT_JOBS']}.")
+            options["MAX_CONCURRENT_JOBS"] = default_recon_options['MAX_CONCURRENT_JOBS']
 
 
-# Obsolete functions below are kept commented out for reference during final review,
-# but will be removed. They are not used by the new secure_transfer based apps.
-#
-# def capture_packet(server_socket: socket.socket) -> tuple[bytes | None, socket.socket, tuple[str, int]]:
-#     """DEPRECATED"""
-#     pass
-#
-# def capture_packet_client(client_socket: socket.socket) -> bytes | None:
-#     """DEPRECATED"""
-#     pass
-#
-# def packet_to_pfile(received_data: bytes) -> tuple[str, list[str]] | tuple[None, None]:
-#     """DEPRECATED"""
-#     pass
-#
-# def args_to_str(*args: any) -> str:
-#     """DEPRECATED"""
-#     pass
-#
-# def str_to_args(input_string: str) -> list[str]:
-#     """DEPRECATED"""
-#     pass
-#
-# def get_opts_tagvals(options_lines: list[str], tag: str) -> list[str]:
-#     """
-#     DEPRECATED. Specific tag parsing (like TRUSTEDIPS) is now handled
-#     directly in the application logic (_load_configuration in server_app.py
-#     and client_app.py by iterating misc_options_lines).
-#     """
-#     pass
-#
-# # Example Python scripts (can be expanded or moved to a plugin system)
-# def pyscript1(*args, **kwargs):
-#     """DEPRECATED Example script 1."""
-#     pass
-#
-# def pyscript2(*args, **kwargs):
-#     """DEPRECATED Example script 2."""
-#     pass
-#
-# # Dictionary to map script names to functions
-# # This allows calling scripts by name (e.g., from network command)
-# pyscripts = { # DEPRECATED
-#     '1': pyscript1,
-#     '2': pyscript2,
-# }
+    return options
+
+```
