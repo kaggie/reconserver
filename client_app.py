@@ -480,4 +480,3 @@ if __name__ == "__main__":
              # If no specific action was run that handles its own disconnect
              app.disconnect()
         print("Client application terminated.")
-```
