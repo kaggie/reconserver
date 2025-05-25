@@ -1,4 +1,4 @@
-# Secure Reconnaissance Server System
+# Secure Recon Server System
 
 ## Overview
 
