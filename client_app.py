@@ -76,28 +76,48 @@ class ReconClientApp:
     def _load_configuration(self):
         self._log_message(f"Loading configuration from '{self.options_file}'...", level="DEBUG")
         try:
-            config = readoptions(self.options_file)
-            self.server_hostname = config[0]
-            self.server_port = int(config[1])
-            self.log_filepath = config[10] 
-            self.shared_key = config[11]
-            misc_lines = config[13]
+            config_dict = readoptions(self.options_file)
 
-            for line in misc_lines:
-                stripped_line = line.strip()
-                if stripped_line.startswith("#"): continue
-                if "=" in stripped_line:
-                    key, value = stripped_line.split("=", 1)
-                    key = key.strip().upper()
-                    value = value.strip()
-                    if key == "CLIENT_DEFAULT_PFILE_NAME": self.default_pfile_name = value
-                    elif key == "CLIENT_DEFAULT_PFILE_PATH": self.default_pfile_path = value
-                    elif key == "CLIENT_DOWNLOAD_DIR": self.client_download_dir = value
+            self.server_hostname = config_dict.get('SERVER_HOSTNAME', 'localhost')
+            # Ensure server_port is an int, readoptions should handle this, but good to be defensive or ensure it.
+            port_val = config_dict.get('SERVER_PORT', 60000)
+            try:
+                self.server_port = int(port_val)
+            except ValueError:
+                self._log_message(f"Invalid SERVER_PORT value '{port_val}'. Using default 60000.", level="WARNING")
+                self.server_port = 60000
             
-            self._log_message(f"Config: Server Host={self.server_hostname}, Port={self.server_port}", level="DEBUG")
-        except FileNotFoundError: self._log_message(f"Options file '{self.options_file}' not found.", level="ERROR"); raise
-        except (IndexError, ValueError) as e: self._log_message(f"Error parsing options: {e}", level="ERROR"); raise
-        except Exception as e: self._log_message(f"Unexpected error loading config: {e}", level="ERROR"); traceback.print_exc(); raise
+            self.log_filepath = config_dict.get('LOG_FILEPATH', '/tmp/recon_client.log')
+            self.shared_key = config_dict.get('SHARED_KEY', 'SET_YOUR_SHARED_KEY_HERE')
+            self.client_download_dir = config_dict.get('CLIENT_DOWNLOAD_DIR', 'client_downloads')
+            self.default_pfile_name = config_dict.get('CLIENT_DEFAULT_PFILE_NAME', 'P00000.7')
+            self.default_pfile_path = config_dict.get('CLIENT_DEFAULT_PFILE_PATH', '/tmp/default_pfile_on_client/P00000.7')
+
+            # Legacy options that might be in old files but are not primary settings for client_app itself
+            # These are mostly for info or if other parts of a larger system might use them from the same opts file.
+            # No need to assign them to self unless client_app directly uses them.
+            # For example, SCANNER_USERNAME, SCANNER_PASSWORD, etc. are not used by ReconClientApp.
+
+            self._log_message(f"Config loaded: Server Host={self.server_hostname}, Port={self.server_port}, "
+                              f"Log File={self.log_filepath}, Shared Key "
+                              f"{'SET' if self.shared_key != 'SET_YOUR_SHARED_KEY_HERE' else 'NOT SET (Using Placeholder)'}, "
+                              f"Download Dir={self.client_download_dir}", level="DEBUG")
+
+        except FileNotFoundError:
+            # This case should ideally be handled by readoptions creating a default file.
+            # If it still occurs, it means readoptions might have failed to create or access it.
+            self._log_message(f"CRITICAL: Options file '{self.options_file}' not found and could not be created/read by readoptions. Client cannot start.", level="ERROR")
+            raise
+        except KeyError as e:
+            # This might occur if readoptions returns a dict missing an absolutely essential key that doesn't have a .get() default.
+            self._log_message(f"CRITICAL: Missing essential configuration key '{e}' in '{self.options_file}'. Client cannot start.", level="ERROR")
+            raise
+        except Exception as e:
+            # Catch any other unexpected errors from readoptions or during assignment
+            self._log_message(f"CRITICAL: Unexpected error loading configuration from '{self.options_file}': {e}", level="ERROR")
+            import traceback # Keep traceback import here for this specific exception logging.
+            traceback.print_exc()
+            raise
 
     def handle_server_command(self, command_type: str, payload: dict) -> bool:
         self._log_message(f"Received command: Type='{command_type}', Payload='{payload}'", level="DEBUG")

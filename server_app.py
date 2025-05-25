@@ -78,26 +78,54 @@ class ReconServerApp:
     def _load_configuration(self):
         self._log_message(f"Loading configuration from '{self.options_file}'...", is_debug=True)
         try:
-            config_tuple = readoptions(self.options_file)
-            self.server_hostname, self.server_port = config_tuple[0], int(config_tuple[1])
-            self.recon_server_base_pfile_dir, self.recon_script_path = config_tuple[6], config_tuple[7]
-            self.recon_server_dicom_output_dir, self.log_filepath = config_tuple[8], config_tuple[10]
-            self.shared_key, self.max_concurrent_jobs = config_tuple[11], int(config_tuple[12])
-            misc_options_lines = config_tuple[13]
+            config_dict = readoptions(self.options_file)
 
-            if self.max_concurrent_jobs <= 0:
-                self._log_message(f"MAX_CONCURRENT_JOBS must be positive. Defaulting to 1.", is_error=True)
+            self.server_hostname = config_dict.get('SERVER_HOSTNAME', 'localhost')
+            
+            port_val = config_dict.get('SERVER_PORT', 60000)
+            try:
+                self.server_port = int(port_val)
+            except ValueError:
+                self._log_message(f"Invalid SERVER_PORT value '{port_val}'. Using default 60000.", is_error=True)
+                self.server_port = 60000
+
+            self.recon_server_base_pfile_dir = config_dict.get('RECON_SERVER_BASE_PFILE_DIR', '/tmp/recon_server_pfiles')
+            self.recon_script_path = config_dict.get('RECON_SCRIPT_PATH', 'default_recon_script.sh')
+            self.recon_server_dicom_output_dir = config_dict.get('RECON_SERVER_DICOM_OUTPUT_DIR', '/tmp/recon_server_dicoms')
+            self.log_filepath = config_dict.get('LOG_FILEPATH', '/tmp/recon_server.log')
+            self.shared_key = config_dict.get('SHARED_KEY', 'SET_YOUR_SHARED_KEY_HERE')
+
+            mcj_val = config_dict.get('MAX_CONCURRENT_JOBS', 1)
+            try:
+                self.max_concurrent_jobs = int(mcj_val)
+            except ValueError:
+                self._log_message(f"Invalid MAX_CONCURRENT_JOBS value '{mcj_val}'. Using default 1.", is_error=True)
                 self.max_concurrent_jobs = 1
             
-            self.trusted_ips = [] 
-            for line in misc_options_lines:
-                line_upper = line.strip().upper()
-                if line_upper.startswith("#TRUSTEDIPS:") or (line_upper.startswith("TRUSTEDIPS:") and not line_upper.startswith("#")):
-                    ips_str = line.split(":", 1)[1].strip()
-                    if ips_str: self.trusted_ips = [ip.strip() for ip in ips_str.split(',') if ip.strip()]
-                    break
-            self._log_message(f"Config: Max Jobs = {self.max_concurrent_jobs}", is_debug=True)
-        except Exception as e: self._log_message(f"CRITICAL: Error loading/parsing config: {e}", is_error=True); traceback.print_exc(); raise
+            if self.max_concurrent_jobs <= 0:
+                self._log_message(f"MAX_CONCURRENT_JOBS must be positive (was {self.max_concurrent_jobs}). Defaulting to 1.", is_error=True)
+                self.max_concurrent_jobs = 1
+            
+            ips_str = config_dict.get('TRUSTED_IPS', '') # Default to empty string if not found
+            if isinstance(ips_str, str) and ips_str.strip(): # Ensure it's a non-empty string
+                self.trusted_ips = [ip.strip() for ip in ips_str.split(',') if ip.strip()]
+            else:
+                self.trusted_ips = [] # Ensure it's an empty list if not set or empty string
+
+            self._log_message(f"Config loaded: Host={self.server_hostname}, Port={self.server_port}, Max Jobs={self.max_concurrent_jobs}, "
+                              f"Trusted IPs={self.trusted_ips if self.trusted_ips else 'Any'}", is_debug=True)
+
+        except FileNotFoundError:
+            # This case should ideally be handled by readoptions creating a default file.
+            self._log_message(f"CRITICAL: Options file '{self.options_file}' not found and could not be created/read by readoptions. Server cannot start.", is_error=True)
+            raise
+        except KeyError as e:
+            self._log_message(f"CRITICAL: Missing essential configuration key '{e}' in '{self.options_file}'. Server cannot start.", is_error=True)
+            raise
+        except Exception as e:
+            self._log_message(f"CRITICAL: Unexpected error loading configuration from '{self.options_file}': {e}", is_error=True)
+            traceback.print_exc()
+            raise
     
     def _validate_ip(self, client_ip: str) -> bool:
         if not self.trusted_ips: return True
