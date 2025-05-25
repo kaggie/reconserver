@@ -363,5 +363,3 @@ def readoptions(optionfile: str):
 
 
     return options
-
-```
