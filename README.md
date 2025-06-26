@@ -99,11 +99,11 @@ CLIENT_DEFAULT_PFILE_PATH = /tmp/default_pfile_on_client/P00000.7
 CLIENT_DOWNLOAD_DIR = client_downloads
 
 # --- Legacy Options (Commented out - generally not used by current core server logic) ---
-# SCANNER_USERNAME = sdc
-# SCANNER_PASSWORD = adw2.0
-# SSH_PORT = 22
-# SOURCE_DATA_PATH = /usr/g/mrraw/
-# SCANNER_DICOM_SOURCE_DIR = /tmp/scanner_dicoms/
+# SCANNER_USERNAME = 
+# SCANNER_PASSWORD = 
+# SSH_PORT = 
+# SOURCE_DATA_PATH = 
+# SCANNER_DICOM_SOURCE_DIR = 
 
 # --- Client Daemon Specific Options (for a separate client_daemon.py, if used) ---
 # CLIENT_WATCH_DIRECTORY = 
