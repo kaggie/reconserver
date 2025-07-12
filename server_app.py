@@ -374,49 +374,53 @@ class ReconServerApp:
         self.worker_statuses[thread_id] = {"status": "idle", "job_id": None, "started_at": time.time(), "name": worker_name}
 
         while not self.shutdown_event.is_set():
-            self.worker_statuses[thread_id].update({"status": "idle", "job_id": None})
-            job_id_being_processed = None
-
-            while not self.shutdown_event.is_set():
-                try:
-                    cpu_load = psutil.cpu_percent(interval=0.5) 
-                    mem_info = psutil.virtual_memory()
-                    available_memory_mb = mem_info.available / (1024 * 1024)
-                    resource_extra = {**log_ctx_worker, 'cpu_load': cpu_load, 'available_memory_mb': available_memory_mb, 'max_cpu_load': self.max_cpu_load, 'min_available_memory_mb': self.min_available_memory}
-                except Exception as e:
-                    self.logger.warning("Could not check system resources. Proceeding as if available.", exc_info=True, extra=log_ctx_worker)
-                    cpu_load = 0 
-                    available_memory_mb = self.min_available_memory + 1 
-                    resource_extra = {**log_ctx_worker, 'cpu_load': 'error_checking', 'available_memory_mb': 'error_checking'}
-
-
-                if cpu_load < self.max_cpu_load and available_memory_mb > self.min_available_memory:
-                    self.logger.debug("Resources OK. Checking for jobs.", extra=resource_extra)
-                    break 
-                else:
-                    self.worker_statuses[thread_id]["status"] = f"waiting_resource (CPU:{cpu_load:.1f} Mem:{available_memory_mb:.0f})"
-                    self.logger.info("Resource constraints hit. Waiting.", extra=resource_extra)
-                    if self.shutdown_event.wait(timeout=float(self.resource_check_interval)):
-                        self.logger.info("Shutdown signaled during resource wait.", extra=log_ctx_worker)
-                        break 
-            
-            self.worker_statuses[thread_id]["status"] = "idle" 
-
-            if self.shutdown_event.is_set():
-                self.logger.info("Exiting due to shutdown signal.", extra=log_ctx_worker)
-                break 
-
-            job = None; conn_to_client = None; job_id = "N/A"; client_ip = "N/A"
-            job_input_dir = None; job_output_dir = None 
-            log_ctx_job = {} 
             try:
-                job = self.job_queue.get(timeout=1) 
-                if job is None: 
+                self.worker_statuses[thread_id].update({"status": "idle", "job_id": None})
+                job_id_being_processed = None
+
+                while not self.shutdown_event.is_set():
+                    try:
+                        cpu_load = psutil.cpu_percent(interval=0.5)
+                        mem_info = psutil.virtual_memory()
+                        available_memory_mb = mem_info.available / (1024 * 1024)
+                        resource_extra = {**log_ctx_worker, 'cpu_load': cpu_load, 'available_memory_mb': available_memory_mb, 'max_cpu_load': self.max_cpu_load, 'min_available_memory_mb': self.min_available_memory}
+                    except Exception as e:
+                        self.logger.warning("Could not check system resources. Proceeding as if available.", exc_info=True, extra=log_ctx_worker)
+                        cpu_load = 0
+                        available_memory_mb = self.min_available_memory + 1
+                        resource_extra = {**log_ctx_worker, 'cpu_load': 'error_checking', 'available_memory_mb': 'error_checking'}
+
+
+                    if cpu_load < self.max_cpu_load and available_memory_mb > self.min_available_memory:
+                        self.logger.debug("Resources OK. Checking for jobs.", extra=resource_extra)
+                        break
+                    else:
+                        self.worker_statuses[thread_id]["status"] = f"waiting_resource (CPU:{cpu_load:.1f} Mem:{available_memory_mb:.0f})"
+                        self.logger.info("Resource constraints hit. Waiting.", extra=resource_extra)
+                        if self.shutdown_event.wait(timeout=float(self.resource_check_interval)):
+                            self.logger.info("Shutdown signaled during resource wait.", extra=log_ctx_worker)
+                            break
+
+                self.worker_statuses[thread_id]["status"] = "idle"
+
+                if self.shutdown_event.is_set():
+                    self.logger.info("Exiting due to shutdown signal.", extra=log_ctx_worker)
+                    break
+
+                job = self.job_queue.get(timeout=1)
+                if job is None:
                     self.job_queue.task_done()
                     self.logger.info("Received None from queue, preparing to exit.", extra=log_ctx_worker)
-                    break 
+                    break
                 
-                job_id = job["job_id"]
+                conn_to_client = None
+                job_id = "N/A"
+                job_input_dir = None
+                job_output_dir = None
+                log_ctx_job = {}
+                try:
+
+                    job_id = job["job_id"]
                 job_id_being_processed = job_id 
                 job["status"] = "processing" 
                 self.worker_statuses[thread_id].update({"status": f"processing_job_{job_id}", "job_id": job_id})
@@ -478,21 +482,19 @@ class ReconServerApp:
                     except: self.logger.error("Failed to notify client of unexpected worker error.", exc_info=True, extra=log_ctx_job if job_id != "N/A" else log_ctx_worker)
             finally:
                 if job: self.job_queue.task_done()
-                if conn_to_client: 
+                if conn_to_client:
                     try: conn_to_client.close()
                     except: pass
                 
-                if job_input_dir and os.path.isdir(job_input_dir): 
+                if job_input_dir and os.path.isdir(job_input_dir):
                     self.logger.info(f"Cleaning up job input dir.", extra={**log_ctx_job, 'input_dir_cleanup': job_input_dir} if job_id != "N/A" else {**log_ctx_worker, 'input_dir_cleanup': job_input_dir})
                     shutil.rmtree(job_input_dir, ignore_errors=True)
                 if job_output_dir and os.path.isdir(job_output_dir):
                     self.logger.info(f"Cleaning up job output dir.", extra={**log_ctx_job, 'output_dir_cleanup': job_output_dir} if job_id != "N/A" else {**log_ctx_worker, 'output_dir_cleanup': job_output_dir})
                     shutil.rmtree(job_output_dir, ignore_errors=True)
-            
-            except queue.Empty: 
-                self.worker_statuses[thread_id]["status"] = "idle_queue_empty"
-                continue 
-        
+        except queue.Empty:
+            self.worker_statuses[thread_id]["status"] = "idle_queue_empty"
+            continue
         self.worker_statuses[thread_id].update({"status": "stopped", "job_id": None})
         self.logger.info("Worker shutting down.", extra=log_ctx_worker)
 

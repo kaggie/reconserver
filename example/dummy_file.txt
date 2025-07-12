@@ -1,0 +1,5 @@
+This is a dummy file for testing the secure transfer.
+It contains some text.
+The content doesn't really matter.
+We just need a file to exist.
+The end.

@@ -1110,5 +1110,3 @@ if __name__ == '__main__':
         print("\nWARNING: Using placeholder encryption/decryption functions.")
         print("Actual encryption/decryption requires reconlibs.py with the 'cryptography' library installed.")
         print("Communication will NOT be secure.")
-
-```

@@ -1,0 +1,36 @@
+# recon.opts - Configuration for Recon Server (server_app.py) and Client (client_app.py)
+
+# --- Server Main Connection ---
+SERVER_HOSTNAME = localhost
+SERVER_PORT = 60000
+SHARED_KEY = SJ8U0U4JNTgn6UqogJkbthc_10crIjv_XNYH8bQqBKw=
+
+# --- Security ---
+TRUSTED_IPS = 127.0.0.1,::1 # Comma-separated, or blank for no IP restriction
+
+# --- Paths ---
+RECON_SERVER_BASE_PFILE_DIR = /tmp/recon_server_pfiles # Base for job-specific input subdirs
+RECON_SCRIPT_PATH = example/dummy_recon.sh           # Path to the reconstruction script
+RECON_JOB_OUTPUT_BASE_DIR = /tmp/recon_server_job_outputs # Base for job-specific output subdirs
+# RECON_SERVER_DICOM_OUTPUT_DIR = /tmp/recon_server_dicoms # Legacy global output, now job-specific
+
+# --- Logging ---
+LOG_FILEPATH = /tmp/recon_project.log
+LOG_LEVEL = INFO # DEBUG, INFO, WARNING, ERROR (for JSON structured logging)
+
+# --- Server Settings ---
+MAX_CONCURRENT_JOBS = 1
+
+# --- Resource Management (Server) ---
+MAX_CPU_LOAD_PERCENT = 75          # e.g., 75 for 75%. Server pauses if CPU load exceeds this.
+MIN_AVAILABLE_MEMORY_MB = 500      # e.g., 500 for 500MB. Server pauses if available RAM drops below this.
+RESOURCE_CHECK_INTERVAL_SECONDS = 10 # How often to check resources when constrained.
+
+# --- Server Admin Interface (for server_admin_cli.py) ---
+SERVER_ADMIN_PORT = 60003
+SERVER_ADMIN_SHARED_KEY = another_key_placeholder
+
+# --- Client Application Default Options (for client_app.py) ---
+CLIENT_DEFAULT_PFILE_NAME = P00000.7
+CLIENT_DEFAULT_PFILE_PATH = /tmp/default_pfile_on_client/P00000.7
+CLIENT_DOWNLOAD_DIR = client_downloads
